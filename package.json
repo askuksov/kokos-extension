@@ -1,9 +1,10 @@
 {
-  "name": "wxt-starter",
-  "description": "manifest.json description",
+  "name": "kokos-extension",
+  "description": "Save and autofill logins from the Kokos password manager.",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
   "scripts": {
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",

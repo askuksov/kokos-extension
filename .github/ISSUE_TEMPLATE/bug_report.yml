@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in the Kokos browser extension does not work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a password, a vault, a key file, or a recovery hint here. A made-up example that shows the same problem is always enough.
+        A security problem does not belong in a public issue — use "Report a security vulnerability" instead.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 131, Firefox 133
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Extension and Kokos app versions
+      placeholder: 0.1.0 / 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: Site where it happens
+      description: Only the domain. Leave empty if it happens everywhere.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Error text or a screenshot helps. Check that neither shows a secret.
+    validations:
+      required: true
