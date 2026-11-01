@@ -65,18 +65,22 @@ the browser's view of the tab, matching the app-side NMH trust basis.
 Autofill runs only on origins the user has explicitly granted (`scripting` +
 `optional_host_permissions`, registered dynamically in `lib/site-access.ts`).
 There is no static content-script match, so an arbitrary page cannot pull the
-fill logic into itself. The site-access map is keyed by **canonical origin**
-so a ported/aliased origin
-cannot self-disable or impersonate a granted one.
+fill logic into itself. The site-access map is keyed by the **portless
+canonical origin**, the same key the host grant uses: a Chrome host permission
+is host-wide and ignores the port, so a grant for a host covers every port on
+it. Storage and the grant therefore cannot drift apart (a ported origin cannot
+self-disable), but the extension does not tell ports of one host apart. The
+app-side origin check is a separate boundary and is not affected by this.
 
 ### Secret handling
 
 The extension holds no long-term secrets. A credential is fetched from the app
 across NMH only in direct response to a user fill action and lives only as long
 as the fill takes. Save/update **always** trigger a native confirmation dialog
-app-side regardless of any prior grant. The badge path reads only **non-secret
-metadata** — `get_logins.items.length` (a count) and the `running` / `locked`
-flags — never a password, username value, or TOTP seed.
+app-side regardless of any prior grant. The badge path calls `get_logins`,
+whose response lists the matching login items (id, title, username, TOTP flag),
+but the badge uses only **non-secret metadata** from it — the item count — plus
+the `running` / `locked` flags. It never receives a password or TOTP seed.
 
 ## Audit history
 
@@ -106,8 +110,10 @@ why, and the boundaries that keep it contained. Modeled on the app's
     the content script is still gated behind a per-site host grant
     (`scripting` + `optional_host_permissions`, no static `content_scripts`),
     so no code runs in a page the user has not enabled.
-  - **No secret exposure.** The badge probe reads only non-secret metadata
-    (`items.length`, `running`/`locked`) over the confirm-gated NMH channel;
+  - **No secret exposure.** The badge probe uses only non-secret metadata
+    (the `get_logins` item count, `running`/`locked`) over the confirm-gated
+    NMH channel; the `get_logins` response also carries login titles and
+    usernames, but never a password or TOTP seed;
     `"tabs"` itself grants no access to page content or to any credential.
   - **Browser-derived only.** The URL is taken from `chrome.tabs.get(...).url`,
     never from a page message, so a hostile page cannot influence which origin
