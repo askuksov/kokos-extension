@@ -7,7 +7,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   // WXT defaults Firefox builds to MV2. This project targets Firefox MV3
   // (background.scripts, no service_worker) — hence the explicit override —
-  // consistent with the gecko strict_min_version below (115.0 has MV3 support).
+  // consistent with the gecko strict_min_version below (140.0 has MV3 support).
   manifestVersion: 3,
   manifest: {
     name: 'Kokos',
@@ -28,10 +28,11 @@ export default defineConfig({
     browser_specific_settings: {
       gecko: {
         id: 'kokos@kuksov.dev',
-        strict_min_version: '115.0',
+        // 140.0 is the first release that shows the built-in consent prompt
+        // for data_collection_permissions; older ones would skip it.
+        strict_min_version: '140.0',
         // AMO counts data sent to the native app as transmission: page URLs
         // (badge and login lookup) and the credentials the user saves.
-        // Firefox before 140 ignores this key.
         data_collection_permissions: { required: ['authenticationInfo', 'browsingActivity'] },
       },
     },
