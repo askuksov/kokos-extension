@@ -21,7 +21,7 @@ Store listings will be linked here once published.
 
 ## Develop
 
-Requires Node.js 20.19 or later.
+Requires Node.js 22.12 or later.
 
 ```sh
 npm install
@@ -29,6 +29,8 @@ npm run dev            # Chrome, with live reload
 npm run dev:firefox
 npm run build          # production build in .output/
 npm run build:firefox
+npm run compile        # type check
+npm test               # unit tests (builds both targets for the manifest test)
 ```
 
 ## Security
