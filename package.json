@@ -18,11 +18,11 @@
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.5",
+    "@types/chrome": "^0.3.7",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
-    "vitest": "^2.1.0",
+    "vitest": "^5.0.5",
     "web-ext": "^10.8.0",
     "wxt": "^0.21.5"
   }
