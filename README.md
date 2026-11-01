@@ -21,7 +21,7 @@ Store listings will be linked here once published.
 
 ## Develop
 
-Requires Node.js 22.12 or later.
+Requires Node.js 22.13 or later.
 
 ```sh
 npm install
