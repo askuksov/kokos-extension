@@ -2,7 +2,7 @@
 
 Saves site logins into [Kokos](https://github.com/askuksov/kokos-app), the
 local-first encrypted password manager, and fills login forms from it. Works in
-Chrome and other Chromium browsers (Manifest V3) and in Firefox 115 or later.
+Chrome and other Chromium browsers (Manifest V3) and in Firefox 140 or later.
 
 The extension talks only to the Kokos desktop app on the same machine, over the
 native-messaging host `dev.kuksov.kokos`. The app stays the sole authority: the
