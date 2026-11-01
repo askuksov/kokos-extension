@@ -26,7 +26,14 @@ export default defineConfig({
       },
     },
     browser_specific_settings: {
-      gecko: { id: 'kokos@kuksov.dev', strict_min_version: '115.0' },
+      gecko: {
+        id: 'kokos@kuksov.dev',
+        strict_min_version: '115.0',
+        // AMO counts data sent to the native app as transmission: page URLs
+        // (badge and login lookup) and the credentials the user saves.
+        // Firefox before 140 ignores this key.
+        data_collection_permissions: { required: ['authenticationInfo', 'browsingActivity'] },
+      },
     },
   },
 });

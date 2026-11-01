@@ -28,6 +28,9 @@ describe('dual-browser manifests', () => {
   it('Firefox MV3 manifest fixes the gecko id and uses background scripts', () => {
     const m = JSON.parse(readFileSync('.output/firefox-mv3/manifest.json', 'utf8'));
     expect(m.browser_specific_settings.gecko.id).toBe('kokos@kuksov.dev');
+    expect(m.browser_specific_settings.gecko.data_collection_permissions).toEqual({
+      required: ['authenticationInfo', 'browsingActivity'],
+    });
     // Firefox MV3 has no service_worker; WXT emits background.scripts.
     expect(m.background.scripts).toBeTruthy();
     expect(m.background.service_worker).toBeUndefined();
