@@ -1,4 +1,4 @@
-# Kokos Extension — Threat Model
+# Kokos Password Manager — Extension Threat Model
 
 Companion document to the desktop app's
 [`docs/THREAT-MODEL.md`](https://github.com/askuksov/kokos-app/blob/main/docs/THREAT-MODEL.md).
@@ -11,7 +11,7 @@ metadata it acts on.
 
 ## Scope & assumptions
 
-The extension is a **thin client** for the Kokos password manager (Chrome MV3
+The extension is a **thin client** for Kokos Password Manager (Chrome MV3
 + Firefox MV3). It saves site logins into Kokos and autofills login forms over
 the Native Messaging host `dev.kuksov.kokos`. **The desktop app is the sole
 authority; the extension holds no long-term secrets** (README) — every secret

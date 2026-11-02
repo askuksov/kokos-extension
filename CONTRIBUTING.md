@@ -1,4 +1,4 @@
-# Contributing to the Kokos browser extension
+# Contributing to the Kokos Password Manager browser extension
 
 Thank you for looking at the code. Please read this before opening anything.
 

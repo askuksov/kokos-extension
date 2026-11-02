@@ -21,6 +21,6 @@ granted in the app.
 
 The response targets, the full scope and the threat model are shared with the
 desktop app; see the
-[Kokos security policy](https://github.com/askuksov/kokos-app/blob/main/SECURITY.md).
+[security policy for Kokos Password Manager](https://github.com/askuksov/kokos-app/blob/main/SECURITY.md).
 A problem in the desktop app or the native-messaging host belongs in a report
 on [kokos-app](https://github.com/askuksov/kokos-app/security/advisories/new).
