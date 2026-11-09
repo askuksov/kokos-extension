@@ -66,29 +66,34 @@ function runContentScript() {
     // one the secret is headed for, so prefer it.
     const anchor = form.password ?? form.username;
     let awaited = false;
-    const outcome = await fillFromMatch(
-      {
-        request,
-        url: url(),
-        usernameField: form.username,
-        passwordField: form.password,
-        gen: snapshot,
-        currentGen: () => gen,
-        isConnected: (el) => !!el && el.isConnected,
-        // Sticky (ms = 0): the app's prompt parks for up to 60s, and a
-        // full-screen browser hides the Kokos window entirely — without this
-        // the user sees nothing at all while the modal waits.
-        onAwaitingApproval: () => {
-          awaited = true;
-          if (anchor) overlay.showToast(anchor, t('awaitingApproval'), 0);
+    // A throw counts as 'error' so the sticky toast is settled on every path.
+    let outcome: FillOutcome = 'error';
+    try {
+      outcome = await fillFromMatch(
+        {
+          request,
+          url: url(),
+          usernameField: form.username,
+          passwordField: form.password,
+          gen: snapshot,
+          currentGen: () => gen,
+          isConnected: (el) => !!el && el.isConnected,
+          // Sticky (ms = 0): the app's prompt parks for up to 60s, and a
+          // full-screen browser hides the Kokos window entirely — without this
+          // the user sees nothing at all while the modal waits.
+          onAwaitingApproval: () => {
+            awaited = true;
+            if (anchor) overlay.showToast(anchor, t('awaitingApproval'), 0);
+          },
         },
-      },
-      match,
-    );
-    // Settled here, not in the overlay's onPick, so popup and shortcut fills
-    // clear the sticky toast too.
-    settleApprovalToast({ outcome, awaited, current: snapshot === gen, anchor, overlay });
-    return outcome;
+        match,
+      );
+      return outcome;
+    } finally {
+      // Settled here, not in the overlay's onPick, so popup and shortcut fills
+      // clear the sticky toast too.
+      settleApprovalToast({ outcome, awaited, current: snapshot === gen, anchor, overlay });
+    }
   }
 
   async function onPick(match: OverlayMatch, form: LoginForm) {
