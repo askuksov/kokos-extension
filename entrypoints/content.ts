@@ -3,7 +3,7 @@
 // get_secret -> fill. Runs only in a frame same-origin with the top page.
 
 import { detectLoginForms, sameOriginAsTop, watch, type LoginForm } from '../lib/detection';
-import { createOverlay, type OverlayMatch } from '../lib/overlay';
+import { createOverlay, type OverlayMatch, type OverlayController } from '../lib/overlay';
 import { fillFromMatch, type FillOutcome } from '../lib/fill';
 import type { NmhResponse, GetLoginsResult } from '../lib/nmh-client';
 import { snapshotCredentials, isSubmitControl, type Captured } from '../lib/save-capture';
@@ -65,7 +65,8 @@ function runContentScript() {
     // The toast anchors on whichever field survives; the password field is the
     // one the secret is headed for, so prefer it.
     const anchor = form.password ?? form.username;
-    return fillFromMatch(
+    let awaited = false;
+    const outcome = await fillFromMatch(
       {
         request,
         url: url(),
@@ -77,21 +78,21 @@ function runContentScript() {
         // Sticky (ms = 0): the app's prompt parks for up to 60s, and a
         // full-screen browser hides the Kokos window entirely — without this
         // the user sees nothing at all while the modal waits.
-        onAwaitingApproval: () => { if (anchor) overlay.showToast(anchor, t('awaitingApproval'), 0); },
+        onAwaitingApproval: () => {
+          awaited = true;
+          if (anchor) overlay.showToast(anchor, t('awaitingApproval'), 0);
+        },
       },
       match,
     );
+    // Settled here, not in the overlay's onPick, so popup and shortcut fills
+    // clear the sticky toast too.
+    settleApprovalToast({ outcome, awaited, current: snapshot === gen, anchor, overlay });
+    return outcome;
   }
 
   async function onPick(match: OverlayMatch, form: LoginForm) {
-    const outcome = await fillEntry(match, form);
-    // A superseded pick (`discarded`) belongs to an older generation — its
-    // toast would talk about a request the user has already replaced.
-    if (outcome === 'discarded') return;
-    const anchor = form.password ?? form.username;
-    if (!anchor) return;
-    if (outcome === 'denied') overlay.showToast(anchor, t('requestDenied'));
-    else overlay.hideToast();
+    await fillEntry(match, form);
   }
 
   function scan() {
@@ -287,4 +288,21 @@ export function wireTotpReceiver(deps: TotpReceiverDeps): void {
     );
     return true; // async sendResponse
   });
+}
+
+// Ends the sticky "waiting for approval" toast once the app has answered.
+// Only the fill that showed the toast and still owns the current generation
+// may touch it: a superseded fill leaves the newer request's toast alone.
+export interface ApprovalToastSettle {
+  outcome: FillOutcome;
+  awaited: boolean;   // the approval toast was shown for this fill
+  current: boolean;   // no newer fill or offer has started since
+  anchor: HTMLElement | null;
+  overlay: Pick<OverlayController, 'showToast' | 'hideToast'>;
+}
+
+export function settleApprovalToast(s: ApprovalToastSettle): void {
+  if (!s.awaited || !s.current) return;
+  if (s.outcome === 'denied' && s.anchor) s.overlay.showToast(s.anchor, t('requestDenied'));
+  else s.overlay.hideToast();
 }

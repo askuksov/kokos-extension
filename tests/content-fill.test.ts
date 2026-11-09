@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 (globalThis as any).defineContentScript ??= (cfg: unknown) => cfg;
 
-const { wireFillReceiver, handleFillEntry, isFillEntryMsg } = await import('../entrypoints/content');
+const { wireFillReceiver, handleFillEntry, isFillEntryMsg, settleApprovalToast } = await import('../entrypoints/content');
 
 const aForm = () => [{ username: null, password: null } as any];
 
@@ -75,5 +75,47 @@ describe('wireFillReceiver', () => {
     await Promise.resolve(); await Promise.resolve();
     expect(fill).toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+});
+
+describe('settleApprovalToast', () => {
+  const anchor = () => document.createElement('input');
+  const overlay = () => ({ showToast: vi.fn(), hideToast: vi.fn() });
+
+  it('hides the waiting toast once the app approved the fill', () => {
+    const o = overlay();
+    settleApprovalToast({ outcome: 'filled', awaited: true, current: true, anchor: anchor(), overlay: o });
+    expect(o.hideToast).toHaveBeenCalledOnce();
+    expect(o.showToast).not.toHaveBeenCalled();
+  });
+
+  it('swaps it for the denied message when the user said no', () => {
+    const o = overlay();
+    const a = anchor();
+    settleApprovalToast({ outcome: 'denied', awaited: true, current: true, anchor: a, overlay: o });
+    expect(o.showToast).toHaveBeenCalledWith(a, 'Denied in Kokos. Click the key icon to ask again.');
+    expect(o.hideToast).not.toHaveBeenCalled();
+  });
+
+  it('hides it for a current discarded or failed fill too', () => {
+    for (const outcome of ['discarded', 'error'] as const) {
+      const o = overlay();
+      settleApprovalToast({ outcome, awaited: true, current: true, anchor: anchor(), overlay: o });
+      expect(o.hideToast, outcome).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('leaves the toast alone when a newer fill owns it', () => {
+    const o = overlay();
+    settleApprovalToast({ outcome: 'denied', awaited: true, current: false, anchor: anchor(), overlay: o });
+    expect(o.showToast).not.toHaveBeenCalled();
+    expect(o.hideToast).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when no approval was asked (username-only step)', () => {
+    const o = overlay();
+    settleApprovalToast({ outcome: 'filled', awaited: false, current: true, anchor: anchor(), overlay: o });
+    expect(o.showToast).not.toHaveBeenCalled();
+    expect(o.hideToast).not.toHaveBeenCalled();
   });
 });
