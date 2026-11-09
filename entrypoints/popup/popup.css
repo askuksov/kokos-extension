@@ -32,6 +32,8 @@ body { width: 340px; background: var(--bg-app); }
   border-radius: var(--radius-pill);
   padding: 3px 9px 3px 8px;
 }
+/* `display` above would override the hidden attribute until a state is known. */
+.state[hidden] { display: none; }
 .state::before {
   content: "";
   width: 7px;
