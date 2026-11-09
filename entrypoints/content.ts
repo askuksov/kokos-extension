@@ -11,6 +11,7 @@ import { findOtpField, fillTotp, type TotpFillOutcome } from '../lib/totp';
 import { detectPasswordFields, fillGenerated, type PasswordFields } from '../lib/generator';
 import type { FillEntryMsg, FillEntryResult, TotpFillMsg, TotpFillResult } from '../lib/entry-picker';
 import { t } from '../lib/strings';
+import { PROBE_KEY, type FrameProbe } from '../lib/frame-target';
 
 export default defineContentScript({
   registration: 'runtime',
@@ -129,9 +130,18 @@ function runContentScript() {
   // (target-field identity + a counter, not a raw mutation counter).
   watch(document.documentElement, () => { scan(); });
 
+  // Lets the popup and the shortcut find the frame that holds the form. Lives in
+  // the extension's isolated world, invisible to the page.
+  const probe = (): FrameProbe => ({
+    login: detectLoginForms(document).length > 0,
+    otp: findOtpField(document) !== null,
+  });
+  (globalThis as Record<string, unknown>)[PROBE_KEY] = probe;
+
   // Popup-driven manual fill: the popup asks THIS frame to fill a chosen
-  // entry. The secret is fetched + used here (never in the popup). Only the top
-  // frame is targeted (popup sends { frameId: 0 }).
+  // entry. The secret is fetched + used here (never in the popup). The popup
+  // targets the frame resolveFillFrame picked: the top frame, or a same-origin
+  // subframe when the form lives there.
   wireFillReceiver({
     ownId: chrome.runtime.id,
     detect: detectLoginForms,
