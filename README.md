@@ -34,17 +34,6 @@ npm run compile        # type check
 npm test               # unit tests (builds both targets for the manifest test)
 ```
 
-## Releases
-
-A pushed tag `vX.Y.Z` builds the Chrome, Firefox and sources zips on GitHub
-Actions and attaches them, with `SHA256SUMS`, to a **draft** release. Nothing is
-published automatically.
-
-1. Bump `version` in `package.json`, commit, push `main`.
-2. Tag and push `vX.Y.Z` (the tag must equal the `package.json` version).
-3. Open the draft, check the files, upload a detached signature of
-   `SHA256SUMS` as `SHA256SUMS.asc`, then publish.
-
 ## Security
 
 Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes. Never
