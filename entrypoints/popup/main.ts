@@ -3,6 +3,7 @@ import type { NmhResponse, GetStatusResult, LoginItem } from '../../lib/nmh-clie
 import type { PendingView } from '../../lib/save-bridge';
 import { filterEntries, isNearExpiry, type PickerListResult, type PickerSecretResult, type FillEntryResult, type TotpFillResult, type CopyTotpResult } from '../../lib/entry-picker';
 import { t } from '../../lib/strings';
+import { resolveFillFrame } from '../../lib/frame-target';
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -152,9 +153,10 @@ export function buildRow(tabId: number, it: LoginItem, status: HTMLElement): HTM
   const actions = document.createElement('div'); actions.className = 'entry-actions';
 
   const fill = document.createElement('button'); fill.textContent = t('fill');
-  fill.onclick = () => {
+  fill.onclick = async () => {
     status.textContent = t('filling');
-    chrome.tabs.sendMessage(tabId, { type: 'fill-entry', entryId: it.id, username: it.username ?? undefined }, { frameId: 0 }, (r: FillEntryResult) => {
+    const frameId = await resolveFillFrame(tabId, 'login');
+    chrome.tabs.sendMessage(tabId, { type: 'fill-entry', entryId: it.id, username: it.username ?? undefined }, { frameId }, (r: FillEntryResult) => {
       if (chrome.runtime.lastError) { status.textContent = t('enableHereToFill'); return; }
       if (r?.ok) status.textContent = t('filled');
       else if (r && !r.ok && r.reason === 'no-form') status.textContent = t('noLoginForm');
@@ -186,9 +188,10 @@ export function buildRow(tabId: number, it: LoginItem, status: HTMLElement): HTM
 
   if (it.hasTotp) {
     const ft = document.createElement('button'); ft.className = 'ghost'; ft.textContent = t('fillCode');
-    const doFillCode = () => {
+    const doFillCode = async () => {
       status.textContent = t('confirmInKokos');
-      chrome.tabs.sendMessage(tabId, { type: 'totp-fill', entryId: it.id }, { frameId: 0 }, (r: TotpFillResult) => {
+      const frameId = await resolveFillFrame(tabId, 'otp');
+      chrome.tabs.sendMessage(tabId, { type: 'totp-fill', entryId: it.id }, { frameId }, (r: TotpFillResult) => {
         if (chrome.runtime.lastError) { status.textContent = t('enableHereToFillCode'); return; }
         if (r?.ok) showValidity(status, actions, r.remaining, t('codeFilled'), doFillCode);
         else if (r && !r.ok && r.reason === 'no-field') status.textContent = t('noTotpField');

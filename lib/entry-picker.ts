@@ -20,7 +20,7 @@ export function filterEntries(items: LoginItem[], query: string): LoginItem[] {
 // the background derives the trusted url from the tab record).
 export interface ListSiteLoginsMsg { type: 'list-site-logins'; tabId: number; }
 export interface CopySecretMsg { type: 'copy-secret'; tabId: number; entryId: string; }
-// Popup -> content script (top frame). Fill runs in the content script so the
+// Popup -> content script (the frame holding the form, see frame-target.ts). Fill runs in the content script so the
 // secret never reaches the popup.
 export interface FillEntryMsg { type: 'fill-entry'; entryId: string; username?: string; }
 
@@ -28,7 +28,7 @@ export type PickerListResult = { ok: true; items: LoginItem[] } | { ok: false; c
 export type PickerSecretResult = { ok: true; value: string } | { ok: false; code: string };
 export type FillEntryResult = { ok: true } | { ok: false; reason: 'no-form' | 'error' };
 
-// Popup -> content script (top frame): fill the entry's live TOTP code into
+// Popup -> content script (the frame holding the field): fill the entry's live TOTP code into
 // the page's one-time-code field. The code is fetched + used in the content
 // script; only { ok, remaining } (metadata) returns to the popup — never the code.
 export interface TotpFillMsg { type: 'totp-fill'; entryId: string; }

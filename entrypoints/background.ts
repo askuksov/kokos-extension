@@ -13,6 +13,7 @@ import { isSaveIgnored, addSaveIgnore } from '../lib/save-ignore';
 import { routePickerMessage, type PickerBridgeDeps } from '../lib/picker-bridge';
 import { routeShortcutFill, type ShortcutFillDeps } from '../lib/shortcut-fill';
 import type { FillEntryResult } from '../lib/entry-picker';
+import { resolveFillFrame } from '../lib/frame-target';
 
 // The one native-port holder for the whole extension.
 export default defineBackground(() => {
@@ -119,15 +120,17 @@ export default defineBackground(() => {
   const shortcutDeps: ShortcutFillDeps = {
     getTabUrl: pickerDeps.getTabUrl,
     request: (origin, action, payload) => pm.request(origin, action, payload),
-    dispatchFill: (tabId, entryId, username) =>
-      new Promise((resolve) => {
+    dispatchFill: async (tabId, entryId, username) => {
+      const frameId = await resolveFillFrame(tabId, 'login');
+      return new Promise((resolve) => {
         chrome.tabs.sendMessage(
           tabId,
           { type: 'fill-entry', entryId, username },
-          { frameId: 0 },
+          { frameId },
           (r: FillEntryResult) => resolve(chrome.runtime.lastError ? undefined : r),
         );
-      }),
+      });
+    },
   };
   chrome.commands.onCommand.addListener((command, tab) => {
     if (command !== 'fill-best-match') return;
