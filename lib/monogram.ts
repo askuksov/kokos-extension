@@ -1,7 +1,7 @@
 // lib/monogram.ts
-// The letter tile shown next to a login, computed exactly like the app's
-// entry list (kokos-app EntryList.tsx) so an entry wears the same colour in
-// the app and in the browser. Pure: no DOM, no chrome.
+// The letter tile shown next to a login. The colour is computed exactly like
+// the app's entry list (kokos-app EntryList.tsx), so an entry wears the same
+// colour in the app and in the browser. Pure: no DOM, no chrome.
 
 function hashTitle(str: string): number {
   let h = 0;
@@ -11,8 +11,10 @@ function hashTitle(str: string): number {
 
 export function monogram(title: string): { letter: string; bg: string } {
   const hue = hashTitle(title || '?') % 360;
+  // First code point, not first UTF-16 unit: an emoji title keeps its whole glyph.
+  const [first] = (title || '?').trim();
   return {
-    letter: (title || '?').trim().charAt(0).toUpperCase() || '?',
+    letter: first ? first.toUpperCase() : '?',
     bg: `linear-gradient(135deg, oklch(0.62 0.13 ${hue}), oklch(0.48 0.15 ${(hue + 45) % 360}))`,
   };
 }
