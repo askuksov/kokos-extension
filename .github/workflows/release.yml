@@ -1,0 +1,120 @@
+# Release builds for the browser extension.
+#
+# A pushed tag `vX.Y.Z` builds the Chrome and Firefox zips and a sources zip,
+# then attaches them and a SHA256SUMS file to a DRAFT release. Nothing is
+# published automatically. Before publishing: check the draft and upload a
+# detached signature of the final SHA256SUMS (SHA256SUMS.asc).
+# A pull request that changes this file runs the build without a release.
+#
+# The tag, the version in package.json and the version in both built
+# manifests must agree, or the run fails.
+#
+# No build cache is used: the extension handles passwords, so a release is
+# built from a clean checkout every time.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['.github/workflows/release.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the version and check it against the tag
+        id: check
+        run: |
+          version=$(jq -r .version package.json)
+          echo "package.json=$version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run compile
+      # `--sources` makes this one run write the Chrome zip and the sources zip.
+      - name: Build the Chrome zip and the sources zip
+        run: npm run zip -- --sources
+      - name: Build the Firefox zip
+        run: npm run zip:firefox
+      # WXT names the files kokos-extension-<version>-<kind>.zip; the release
+      # carries kokos-<version>-<kind>.zip, the names the download page expects.
+      - name: Collect the files under their release names
+        run: |
+          mkdir out
+          for kind in chrome firefox sources; do
+            cp ".output/kokos-extension-$VERSION-$kind.zip" "out/kokos-$VERSION-$kind.zip"
+          done
+          ls -l out
+      - name: Check the built manifests against the version
+        run: |
+          for kind in chrome firefox; do
+            dir=$(mktemp -d)
+            unzip -q "out/kokos-$VERSION-$kind.zip" manifest.json -d "$dir"
+            built=$(jq -r .version "$dir/manifest.json")
+            echo "$kind manifest=$built"
+            [ "$built" = "$VERSION" ] || { echo "::error::$kind manifest version $built does not match $VERSION"; exit 1; }
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: extension
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [version, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: extension
+          path: out
+      - name: Write SHA256SUMS
+        run: |
+          cd out
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      # No --clobber: a release or an asset that already exists fails the run.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Kokos Extension $VERSION" --notes "" out/*
