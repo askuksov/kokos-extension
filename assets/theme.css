@@ -1,0 +1,159 @@
+/* Geist: SIL Open Font License 1.1, text shipped as fonts/Geist-OFL.txt. */
+/* Shared look for the popup and the options page. Tokens mirror the Kokos
+   app (kokos-app src/styles/tokens.css). The extension cannot read the app's
+   theme setting, so it follows the browser's light / dark preference. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("./fonts/Geist.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  --font: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-xs: 6px;
+  --radius-sm: 7px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-pill: 999px;
+
+  --bg-app: oklch(0.165 0.012 60);
+  --bg-panel: oklch(0.175 0.012 60);
+  --bg-card: oklch(0.205 0.014 60);
+  --bg-raise: oklch(0.245 0.016 60);
+  --bg-input: oklch(0.225 0.015 60);
+  --bg-hover: oklch(1 0 0 / 0.05);
+  --bg-active: oklch(1 0 0 / 0.08);
+  --text-1: oklch(0.93 0.006 65);
+  --text-2: oklch(0.68 0.016 65);
+  --text-3: oklch(0.5 0.016 65);
+  --line: oklch(1 0 0 / 0.07);
+  --line-strong: oklch(1 0 0 / 0.13);
+  --accent: oklch(0.68 0.09 62);
+  --accent-deep: oklch(0.58 0.095 55);
+  --accent-soft: oklch(0.68 0.09 62 / 0.16);
+  --accent-glow: oklch(0.68 0.09 62 / 0.34);
+  --on-accent: oklch(0.98 0.012 78);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.25);
+  --monogram-shadow: oklch(0 0 0 / 0.2);
+  --monogram-highlight: oklch(1 0 0 / 0.18);
+  --btn-highlight: oklch(1 0 0 / 0.18);
+  --danger: oklch(0.66 0.16 25);
+  --ok: oklch(0.7 0.15 155);
+  --warn: oklch(0.74 0.13 80);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-app: oklch(0.965 0.006 70);
+    --bg-panel: oklch(0.997 0.002 70);
+    --bg-card: oklch(0.985 0.005 70);
+    --bg-raise: oklch(1 0 0);
+    --bg-input: oklch(0.955 0.008 70);
+    --bg-hover: oklch(0.3 0.03 60 / 0.05);
+    --bg-active: oklch(0.3 0.03 60 / 0.08);
+    --text-1: oklch(0.26 0.02 60);
+    --text-2: oklch(0.5 0.018 62);
+    --text-3: oklch(0.66 0.014 62);
+    --line: oklch(0.3 0.03 60 / 0.08);
+    --line-strong: oklch(0.3 0.03 60 / 0.16);
+    --accent: oklch(0.6 0.095 60);
+    --accent-deep: oklch(0.52 0.095 54);
+    --accent-soft: oklch(0.6 0.095 60 / 0.12);
+    --accent-glow: oklch(0.6 0.095 60 / 0.28);
+    --on-accent: oklch(0.99 0.012 78);
+    --shadow-card: 0 1px 2px oklch(0.28 0.03 60 / 0.07);
+    --danger: oklch(0.58 0.18 25);
+    --ok: oklch(0.58 0.15 155);
+    --warn: oklch(0.62 0.13 75);
+    color-scheme: light;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-1);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Buttons follow the app's .kv-btn: plain buttons are ghost, .primary is the
+   accent gradient, .danger is a red ghost. */
+button {
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-1);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, filter 0.15s ease;
+}
+button:hover:not(:disabled) { background: var(--bg-hover); }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.primary {
+  color: var(--on-accent);
+  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+  box-shadow: 0 1px 3px var(--accent-glow), inset 0 1px 0 var(--btn-highlight);
+}
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+  filter: brightness(1.08);
+}
+button.danger { color: var(--danger); }
+button.danger:hover:not(:disabled) { background: color-mix(in oklch, var(--danger) 12%, transparent); }
+
+input[type="search"], input[type="text"] {
+  font: inherit;
+  color: var(--text-1);
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  box-shadow: inset 0 0 0 1px var(--line);
+  outline: none;
+}
+input:focus-visible { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+input::placeholder { color: var(--text-3); }
+
+.monogram {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px var(--monogram-shadow);
+  box-shadow: inset 0 1px 0 var(--monogram-highlight), var(--shadow-card);
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-pill);
+  padding: 1px 7px;
+}

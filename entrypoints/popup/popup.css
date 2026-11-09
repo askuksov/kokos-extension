@@ -1,0 +1,116 @@
+body { width: 340px; background: var(--bg-app); }
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+}
+.logo { width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0; }
+.brand { min-width: 0; flex: 1; }
+.name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
+.site {
+  color: var(--text-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connection state: a dot + word, coloured like the app's status tones. */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--bg-hover);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px 3px 8px;
+}
+.state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.state.ready::before { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 22%, transparent); }
+.state.locked::before { background: var(--warn); }
+
+.body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.body:has(#hint:empty):has(#save:empty):has(#list:empty) { display: none; }
+
+.hint {
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn) 12%, transparent);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.hint:empty, #save:empty, #list:empty { display: none; }
+
+/* Status lines inside the list and the save card are quieter than the banner. */
+#list .status, #save .status {
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+#list .status:empty, #save .status:empty { display: none; }
+
+#list { display: flex; flex-direction: column; gap: 8px; }
+#list > .hint { color: var(--text-2); background: var(--bg-card); }
+#list .filter { margin-bottom: 2px; }
+#list .rows { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+
+.entry {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-card);
+  padding: 10px;
+}
+.entry-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.entry-text { min-width: 0; flex: 1; }
+.entry-title {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entry-user {
+  display: block;
+  color: var(--text-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entry-totp { flex-shrink: 0; }
+.entry-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+/* Up to three per line: a TOTP entry's five actions wrap to a second row. */
+.entry-actions button { flex: 1 1 84px; font-size: 12px; padding: 6px 8px; }
+.entry-actions button.primary { flex-grow: 1.3; }
+
+#save {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 1px var(--accent-soft), var(--shadow-card);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#save .row { font-weight: 600; }
+#save .user { color: var(--text-2); font-size: 12px; margin-bottom: 4px; overflow-wrap: anywhere; }
+#save .save-actions { display: flex; gap: 6px; }
+#save .save-actions button { flex: 1 1 0; font-size: 12px; }
+#save > .hint { margin: 0; }
+
+.foot { padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--bg-panel); }
+.foot button { width: 100%; }

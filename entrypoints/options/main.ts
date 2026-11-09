@@ -26,6 +26,8 @@ async function renderList(
 }
 
 function main(): void {
+  const sub = document.getElementById('sub');
+  if (sub) sub.textContent = t('optSubtitle');
   document.getElementById('fill-h')!.textContent = t('optFillHeading');
   document.getElementById('save-h')!.textContent = t('optSaveOffHeading');
   void renderList('fill-list', listEnabledSites, t('optDisable'), disableSite);
