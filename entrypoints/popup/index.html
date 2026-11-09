@@ -1,34 +1,28 @@
 <!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>Kokos</title>
-    <style>
-      body { width: 260px; margin: 0; font: 13px system-ui; padding: 12px; }
-      button { width: 100%; padding: 8px; margin-top: 8px; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; }
-      .hint { color: #a06400; margin-top: 8px; }
-      #site { font-weight: 600; }
-      #list { margin-top: 8px; }
-      #list .filter { width: 100%; box-sizing: border-box; padding: 6px; margin: 4px 0; border-radius: 6px; border: 1px solid #ccc; }
-      #list .entry { border-top: 1px solid #eee; padding: 8px 0; }
-      #list .entry-head { display: flex; gap: 6px; align-items: baseline; }
-      #list .entry-title { font-weight: 600; }
-      #list .entry-user { color: #666; font-size: 12px; }
-      #list .entry-totp { margin-left: auto; font-size: 10px; color: #a06400; border: 1px solid #e0c060; border-radius: 3px; padding: 0 4px; }
-      #list .entry-actions { display: flex; gap: 6px; margin-top: 6px; }
-      #list .entry-actions button { width: auto; flex: 1; margin-top: 0; padding: 6px 4px; font-size: 12px; }
-      #list .status { margin-top: 6px; }
-      #save { margin-top: 10px; }
-      #save .row { font-weight: 600; }
-      #save .user { color: #555; margin: 2px 0 6px; }
-      #save .ghost, #list .ghost { background: #f4f4f4; }
-      #save .status { margin-top: 6px; }
-    </style>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kokos</title>
+    <link rel="stylesheet" href="../../assets/theme.css" />
+    <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <div id="site"></div>
-    <div id="hint" class="hint"></div>
-    <div id="list"></div>
-    <div id="save"></div>
-    <button id="toggle" disabled>…</button>
+    <header class="top">
+      <img class="logo" src="/icon/48.png" alt="" />
+      <div class="brand">
+        <div class="name">Kokos</div>
+        <div id="site" class="site"></div>
+      </div>
+      <span id="state" class="state" hidden></span>
+    </header>
+    <main class="body">
+      <div id="hint" class="hint"></div>
+      <div id="save"></div>
+      <div id="list"></div>
+    </main>
+    <footer class="foot">
+      <button id="toggle" disabled>…</button>
+    </footer>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

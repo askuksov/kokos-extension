@@ -3,25 +3,52 @@
   <head>
     <meta charset="utf-8" />
     <title>Kokos options</title>
+    <link rel="stylesheet" href="../../assets/theme.css" />
     <style>
-      body { font: 14px system-ui, sans-serif; margin: 1.5rem; max-width: 40rem; }
-      h1 { font-size: 1.25rem; } h2 { font-size: 1rem; margin-top: 1.5rem; }
-      .site-row { display: flex; align-items: center; justify-content: space-between; padding: .4rem 0; border-bottom: 1px solid #eee; }
-      .site { font-family: ui-monospace, monospace; }
-      .empty { color: #888; padding: .4rem 0; }
-      button { cursor: pointer; }
+      body { padding: 28px 24px 40px; }
+      .wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+      .top { display: flex; align-items: center; gap: 12px; }
+      .logo { width: 36px; height: 36px; border-radius: var(--radius-md); }
+      h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+      .sub { color: var(--text-2); font-size: 13px; }
+      section {
+        background: var(--bg-card);
+        border-radius: var(--radius-lg);
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-card);
+        padding: 6px 14px 8px;
+      }
+      h2 {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--text-3); margin: 10px 0 4px;
+      }
+      .site-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 8px 0; border-top: 1px solid var(--line);
+      }
+      h2 + div > .site-row:first-child { border-top: none; }
+      .site { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+      .site-row button { font-size: 12px; flex-shrink: 0; }
+      .empty { color: var(--text-3); padding: 6px 0 4px; }
     </style>
   </head>
   <body>
-    <h1>Kokos</h1>
-    <section>
-      <h2 id="fill-h"></h2>
-      <div id="fill-list"></div>
-    </section>
-    <section>
-      <h2 id="save-h"></h2>
-      <div id="save-list"></div>
-    </section>
+    <div class="wrap">
+      <header class="top">
+        <img class="logo" src="/icon/48.png" alt="" />
+        <div>
+          <h1>Kokos</h1>
+          <div id="sub" class="sub"></div>
+        </div>
+      </header>
+      <section>
+        <h2 id="fill-h"></h2>
+        <div id="fill-list"></div>
+      </section>
+      <section>
+        <h2 id="save-h"></h2>
+        <div id="save-list"></div>
+      </section>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

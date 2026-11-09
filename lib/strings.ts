@@ -11,6 +11,9 @@ export const STRINGS = {
   openKokos: 'Open Kokos to continue.',
   enableHere: 'Enable Kokos here',
   disableHere: 'Disable Kokos here',
+  stateReady: 'Connected',
+  stateLocked: 'Locked',
+  stateOffline: 'Not running',
   // popup — save flow
   unlockThenReopenSave: 'Unlock Kokos, then reopen to save this login.',
   updatePrompt: 'Update password in Kokos?',
@@ -65,6 +68,7 @@ export const STRINGS = {
   optDisable: 'Disable',
   optReEnable: 'Re-enable',
   optNoSites: 'No sites yet.',
+  optSubtitle: 'Browser extension settings',
   // toolbar badge — tooltips
   badgeDefault: 'Kokos',
   badgeNotRunning: 'Kokos — app not running',

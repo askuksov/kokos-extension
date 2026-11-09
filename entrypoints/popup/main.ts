@@ -4,6 +4,7 @@ import type { PendingView } from '../../lib/save-bridge';
 import { filterEntries, isNearExpiry, type PickerListResult, type PickerSecretResult, type FillEntryResult, type TotpFillResult, type CopyTotpResult } from '../../lib/entry-picker';
 import { t } from '../../lib/strings';
 import { resolveFillFrame } from '../../lib/frame-target';
+import { monogram } from '../../lib/monogram';
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -65,7 +66,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
 
   const status = document.createElement('div'); status.className = 'status hint';
 
-  const primary = document.createElement('button');
+  const primary = document.createElement('button'); primary.className = 'primary';
   primary.textContent = isUpdate ? t('update') : t('save');
 
   const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
@@ -85,7 +86,9 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
     else { primary.disabled = false; status.textContent = t('couldNotSave'); }
   };
 
-  box.append(primary, dismiss, never, status);
+  const buttons = document.createElement('div'); buttons.className = 'save-actions';
+  buttons.append(primary, dismiss, never);
+  box.append(buttons, status);
 }
 
 // Per-site login picker. Only rendered when Kokos is running + unlocked.
@@ -104,7 +107,7 @@ async function renderList(tab: chrome.tabs.Tab): Promise<void> {
   }
 
   const status = document.createElement('div'); status.className = 'status hint';
-  const rows = document.createElement('div');
+  const rows = document.createElement('div'); rows.className = 'rows';
   const draw = (list: LoginItem[]) => {
     rows.textContent = '';
     for (const it of list) rows.appendChild(buildRow(tab.id!, it, status));
@@ -137,22 +140,28 @@ export function buildRow(tabId: number, it: LoginItem, status: HTMLElement): HTM
   const row = document.createElement('div'); row.className = 'entry';
 
   const head = document.createElement('div'); head.className = 'entry-head';
+  const name = it.title || it.username || t('entryFallback');
+  const m = monogram(name);
+  const tile = document.createElement('div'); tile.className = 'monogram';
+  tile.style.background = m.bg; tile.textContent = m.letter;
+  const text = document.createElement('div'); text.className = 'entry-text';
   const title = document.createElement('span'); title.className = 'entry-title';
-  title.textContent = it.title || it.username || t('entryFallback');
-  head.appendChild(title);
+  title.textContent = name;
+  text.appendChild(title);
   if (it.username) {
     const u = document.createElement('span'); u.className = 'entry-user'; u.textContent = it.username;
-    head.appendChild(u);
+    text.appendChild(u);
   }
+  head.append(tile, text);
   if (it.hasTotp) {
-    const dot = document.createElement('span'); dot.className = 'entry-totp'; dot.textContent = 'TOTP';
+    const dot = document.createElement('span'); dot.className = 'entry-totp badge'; dot.textContent = 'TOTP';
     head.appendChild(dot);
   }
   row.appendChild(head);
 
   const actions = document.createElement('div'); actions.className = 'entry-actions';
 
-  const fill = document.createElement('button'); fill.textContent = t('fill');
+  const fill = document.createElement('button'); fill.className = 'primary'; fill.textContent = t('fill');
   fill.onclick = async () => {
     status.textContent = t('filling');
     const frameId = await resolveFillFrame(tabId, 'login');
@@ -223,6 +232,15 @@ export function buildRow(tabId: number, it: LoginItem, status: HTMLElement): HTM
   return row;
 }
 
+// Header pill: is the app reachable, and is the vault open.
+function showState(state: 'ready' | 'locked' | 'offline'): void {
+  const el = document.getElementById('state');
+  if (!el) return;
+  el.className = `state ${state}`;
+  el.textContent = state === 'ready' ? t('stateReady') : state === 'locked' ? t('stateLocked') : t('stateOffline');
+  el.hidden = false;
+}
+
 async function render() {
   const tab = await activeTab();
   const toggle = document.getElementById('toggle') as HTMLButtonElement;
@@ -241,6 +259,7 @@ async function render() {
   if (locked) hintEl.textContent = t('unlockToFill');
   else if (!status.ok && status.error?.code === 'app_not_running') hintEl.textContent = t('openKokos');
   else hintEl.textContent = '';
+  showState(status.ok ? (locked ? 'locked' : 'ready') : 'offline');
 
   if (status.ok && !locked) await renderList(tab);
   else listEl.textContent = '';
@@ -248,6 +267,7 @@ async function render() {
   const enabled = await isEnabled(url);
   toggle.disabled = false;
   toggle.textContent = enabled ? t('disableHere') : t('enableHere');
+  toggle.className = enabled ? '' : 'primary';
   toggle.onclick = async () => {
     toggle.disabled = true;
     if (enabled) await disableSite(url); else await enableSite(url);
