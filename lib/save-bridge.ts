@@ -53,6 +53,7 @@ export interface PendingView {
 export interface SaveBridgeDeps {
   ownId: string;
   request(origin: string, action: string, payload: object): Promise<NmhResponse>;
+  isEnabled(url: string): Promise<boolean>;
   isSaveIgnored(url: string): Promise<boolean>;
   addSaveIgnore(url: string): Promise<void>;
   setBadge(tabId: number, on: boolean): void;
@@ -88,6 +89,9 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   const origin = sender.origin;                 // browser-derived, unspoofable
   const url = sender.url && sender.url.length > 0 ? sender.url : origin;
   if (typeof tabId !== 'number' || !origin || !url) return { ok: false }; // not a real content-script sender
+  // Disabling a site does not stop content scripts already running in open tabs,
+  // so a capture can still arrive from a site the user has turned off.
+  if (!(await deps.isEnabled(url))) return { ok: false };
   if (await deps.isSaveIgnored(url)) return { ok: false };
   const token = valueToken(msg.password);
   if (!shouldBadge(deps.gate, { origin, username: msg.username, token })) return { ok: false };

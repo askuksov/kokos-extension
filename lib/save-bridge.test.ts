@@ -10,6 +10,7 @@ function makeDeps(over: Partial<SaveBridgeDeps> = {}): SaveBridgeDeps {
   return {
     ownId: 'self',
     request: vi.fn(async () => ok({ items: [] })),
+    isEnabled: vi.fn(async () => true),
     isSaveIgnored: vi.fn(async () => false),
     addSaveIgnore: vi.fn(async () => {}),
     setBadge: vi.fn(),
@@ -44,6 +45,23 @@ describe('save-capture', () => {
     const p = deps.pending.get(7)!;
     expect(p).toMatchObject({ username: 'alice', password: 'pw', url: 'https://a.com/login', origin: 'https://a.com', token: 'tok' });
     expect(deps.setBadge).toHaveBeenCalledWith(7, true);
+  });
+  it('drops a capture from a site that is no longer enabled', async () => {
+    const deps = makeDeps({ isEnabled: vi.fn(async () => false) });
+    const res = await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);
+    expect(res).toEqual({ ok: false });
+    expect(deps.pending.size).toBe(0);
+    expect(deps.setBadge).not.toHaveBeenCalled();
+  });
+  it('checks site access against the trusted sender url, not the message body', async () => {
+    const isEnabled = vi.fn(async () => true);
+    const deps = makeDeps({ isEnabled });
+    await routeSaveMessage(
+      { type: 'save-capture', username: 'alice', password: 'pw', url: 'https://evil.com/x' } as any,
+      csSender,
+      deps,
+    );
+    expect(isEnabled).toHaveBeenCalledWith('https://a.com/login');
   });
   it('drops when the origin is on the never-save list', async () => {
     const deps = makeDeps({ isSaveIgnored: vi.fn(async () => true) });

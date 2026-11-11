@@ -90,6 +90,7 @@ export default defineBackground(() => {
   const saveDeps: SaveBridgeDeps = {
     ownId: chrome.runtime.id,
     request: (origin, action, payload) => pm.request(origin, action, payload),
+    isEnabled,
     isSaveIgnored,
     addSaveIgnore,
     setBadge: (tabId, on) => {
