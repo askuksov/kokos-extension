@@ -19,6 +19,7 @@ function makeDeps(over: Partial<SaveBridgeDeps> = {}): SaveBridgeDeps {
     newToken: () => 'tok',
     gate: newGateState(),
     pending: new Map<number, Pending>(),
+    captureSeq: new Map<number, number>(),
     ...over,
   };
 }
@@ -227,5 +228,27 @@ describe('save-capture — re-offer after the saved entry is deleted', () => {
     (deps.request as any).mockClear();
     expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: false });
     expect(deps.request).not.toHaveBeenCalled();
+  });
+});
+
+describe('save-capture — out-of-order completion', () => {
+  it('an older capture finishing its vault check late does not replace a newer one', async () => {
+    const deps = makeDeps();
+    // Save password A so a repeat of A goes through the vault check.
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await routeSaveMessage({ type: 'commit-pending-save', tabId: 7 }, popupSender, deps);
+
+    let release!: (r: NmhResponse) => void;
+    deps.request = vi.fn(() => new Promise<NmhResponse>((r) => { release = r; }));
+    const repeatA = routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await vi.waitFor(() => expect(deps.request).toHaveBeenCalled());
+
+    // Password B arrives while A's lookup is still pending.
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'B' }, csSender, deps);
+    expect(deps.pending.get(7)?.password).toBe('B');
+
+    release(ok({ items: [] })); // the vault no longer has alice
+    expect(await repeatA).toEqual({ ok: false });
+    expect(deps.pending.get(7)?.password).toBe('B');
   });
 });

@@ -64,6 +64,9 @@ export interface SaveBridgeDeps {
   newToken(): string;
   gate: GateState;
   pending: Map<number, Pending>;
+  // Per-tab capture counter: a capture that finished its async checks after a
+  // newer one from the same tab must not overwrite that newer capture.
+  captureSeq: Map<number, number>;
 }
 
 const SAVE_TYPES = new Set(['save-capture', 'get-pending-save', 'commit-pending-save', 'dismiss-pending-save', 'never-save-here']);
@@ -101,16 +104,21 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   const origin = sender.origin;                 // browser-derived, unspoofable
   const url = sender.url && sender.url.length > 0 ? sender.url : origin;
   if (typeof tabId !== 'number' || !origin || !url) return { ok: false }; // not a real content-script sender
+  const seq = (deps.captureSeq.get(tabId) ?? 0) + 1;
+  deps.captureSeq.set(tabId, seq);
+  const superseded = () => deps.captureSeq.get(tabId) !== seq;
   // Disabling a site does not stop content scripts already running in open tabs,
   // so a capture can still arrive from a site the user has turned off.
   if (!(await deps.isEnabled(url))) return { ok: false };
   if (await deps.isSaveIgnored(url)) return { ok: false };
+  if (superseded()) return { ok: false };
   const token = valueToken(msg.password);
   const key = { origin, username: msg.username, token };
   if (!shouldBadge(deps.gate, key)) {
     // Same value already offered this session. Offer again only when the user
     // saved it and the vault no longer has that login (deleted in the app).
     if (!wasSaved(deps.gate, key) || await vaultHasLogin(origin, url, msg.username, deps)) return { ok: false };
+    if (superseded()) return { ok: false };
     forgetSaved(deps.gate, key);
   }
   recordPrompt(deps.gate, key);
