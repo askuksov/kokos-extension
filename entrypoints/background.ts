@@ -6,7 +6,7 @@ import { composeStatusIcon } from '../lib/badge-icon';
 import { computeProbe, isSettleUpdate, type BadgeDeps } from '../lib/badge-controller';
 
 const SAVE_DOT = '#c0392b'; // red corner dot = a login is pending save on this tab
-import { initSiteAccess, isEnabled } from '../lib/site-access';
+import { initSiteAccess, isEnabled, originPattern } from '../lib/site-access';
 import { routeSaveMessage, type SaveBridgeDeps, type Pending } from '../lib/save-bridge';
 import { newGateState } from '../lib/save-prompt-gate';
 import { isSaveIgnored, addSaveIgnore } from '../lib/save-ignore';
@@ -22,7 +22,27 @@ export default defineBackground(() => {
     (host) => chrome.runtime.connectNative(host) as unknown as NativePort,
   );
 
-  initSiteAccess();
+  async function isPopupOpen(): Promise<boolean> {
+    try {
+      const ctx = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.POPUP] });
+      return ctx.length > 0;
+    } catch { return false; } // getContexts missing: assume closed
+  }
+
+  // A site enabled while the popup was gone (Firefox closes it for the
+  // permission prompt): reload its active tab so the content script runs.
+  // With the popup still open (Chrome), the popup reloads the tab itself.
+  initSiteAccess((origins) => {
+    void (async () => {
+      if (await isPopupOpen()) return;
+      const wanted = new Set(origins.map((o) => `${o}/*`));
+      const tabs = await chrome.tabs.query({ active: true });
+      for (const t of tabs) {
+        if (typeof t.id !== 'number' || !t.url) continue;
+        try { if (wanted.has(originPattern(t.url))) void chrome.tabs.reload(t.id); } catch { /* non-http url */ }
+      }
+    })();
+  });
 
   const badgeDeps: BadgeDeps = {
     request: (origin, action, payload) => pm.request(origin, action, payload),
@@ -100,12 +120,7 @@ export default defineBackground(() => {
         return { active: t.active, windowId: t.windowId };
       } catch { return undefined; } // tab gone
     },
-    isPopupOpen: async () => {
-      try {
-        const ctx = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.POPUP] });
-        return ctx.length > 0;
-      } catch { return false; } // getContexts missing: assume closed, openPopup copes
-    },
+    isPopupOpen,
     openPopup: async (windowId) => { await chrome.action.openPopup({ windowId }); },
     showHint: (tabId) => new Promise((resolve) => {
       chrome.tabs.sendMessage(tabId, { type: 'save-hint' }, { frameId: 0 }, (r?: { ok?: boolean }) =>

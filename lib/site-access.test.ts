@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { originPattern, enableSite, disableSite, isEnabled, reconcile, listEnabledSites, siteOriginOf, onOriginsAdded } from './site-access';
+import { originPattern, enableSite, disableSite, isEnabled, reconcile, listEnabledSites, siteOriginOf, onOriginsAdded, initSiteAccess } from './site-access';
 
 function installFakeChrome(granted: boolean) {
   const store: Record<string, any> = {};
@@ -15,8 +15,13 @@ function installFakeChrome(granted: boolean) {
       onAdded: { addListener: vi.fn() },
     },
     scripting: {
-      registerContentScripts: vi.fn(async (s: any[]) => { registered.push(...s); }),
-      unregisterContentScripts: vi.fn(async () => {}),
+      registerContentScripts: vi.fn(async (s: any[]) => {
+        if (s.some((script) => registered.some((r) => r.id === script.id))) throw new Error('Duplicate script ID');
+        registered.push(...s);
+      }),
+      unregisterContentScripts: vi.fn(async ({ ids }: any) => {
+        for (let i = registered.length - 1; i >= 0; i--) if (ids.includes(registered[i].id)) registered.splice(i, 1);
+      }),
       getRegisteredContentScripts: vi.fn(async ({ ids }: any) => registered.filter((r) => ids.includes(r.id))),
     },
     storage: {
@@ -113,12 +118,21 @@ describe('onOriginsAdded (grant finished in the background)', () => {
     await onOriginsAdded(['https://a.com/*']);
     expect(await listEnabledSites()).toEqual(['https://a.com']);
   });
-  it('tolerates a duplicate-id race when the script is already registered', async () => {
+  it('two callers enabling the same site at once both succeed with one registration', async () => {
     const ctx = installFakeChrome(true);
-    await onOriginsAdded(['https://a.com/*']);
-    (chrome.scripting.registerContentScripts as any).mockRejectedValueOnce(new Error('Duplicate script ID'));
-    await expect(onOriginsAdded(['https://a.com/*'])).resolves.toBeUndefined();
-    expect(ctx.registered.length).toBe(1);
+    // Both unregister first, then both register: the second hits a duplicate id.
+    await expect(Promise.all([
+      onOriginsAdded(['https://a.com/*']),
+      onOriginsAdded(['https://a.com/*']),
+    ])).resolves.toBeDefined();
+    expect(chrome.scripting.registerContentScripts).toHaveBeenCalledTimes(2);
+    expect(ctx.registered.map((r) => r.id)).toEqual(['kokos-cs:https://a.com/*']);
+    expect(await listEnabledSites()).toEqual(['https://a.com']);
+  });
+  it('still fails when registration fails and nothing is registered', async () => {
+    installFakeChrome(true);
+    (chrome.scripting.registerContentScripts as any).mockRejectedValueOnce(new Error('bad file'));
+    await expect(onOriginsAdded(['https://a.com/*'])).rejects.toThrow('bad file');
   });
 });
 
@@ -129,5 +143,18 @@ describe('reconcile picks up a missed grant', () => {
     ctx.perms.add('<all_urls>');
     await reconcile();
     expect(await listEnabledSites()).toEqual(['https://b.com']);
+  });
+});
+
+describe('initSiteAccess onAdded', () => {
+  it('reports the sites a grant enabled, and nothing for an all-sites grant', async () => {
+    installFakeChrome(true);
+    const onEnabled = vi.fn();
+    initSiteAccess(onEnabled);
+    const listener = (chrome.permissions.onAdded.addListener as any).mock.calls[0][0];
+    listener({ origins: ['<all_urls>'] });
+    listener({ origins: ['https://a.com/*'] });
+    await vi.waitFor(() => expect(onEnabled).toHaveBeenCalledWith(['https://a.com']));
+    expect(onEnabled).toHaveBeenCalledTimes(1);
   });
 });

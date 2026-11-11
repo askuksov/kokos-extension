@@ -85,13 +85,16 @@ export function siteOriginOf(pattern: string): string | null {
 /** Finish enabling sites the user granted. Firefox closes the popup when the
  * permission prompt opens, so enableSite never gets past its request there;
  * the background completes the job from permissions.onAdded instead. */
-export async function onOriginsAdded(patterns: string[]): Promise<void> {
+export async function onOriginsAdded(patterns: string[]): Promise<string[]> {
+  const enabled: string[] = [];
   for (const pattern of patterns) {
     const origin = siteOriginOf(pattern);
     if (!origin) continue;
     await registerFor(`${origin}/*`);
     await setList([...(await getList()), origin]);
+    enabled.push(origin);
   }
+  return enabled;
 }
 
 export async function isEnabled(url: string): Promise<boolean> {
@@ -118,9 +121,14 @@ export async function reconcile(): Promise<void> {
   }));
 }
 
-export function initSiteAccess(): void {
+/** `onEnabled` gets the origins a grant enabled, so the caller can bring open
+ * pages up to date (the popup may be gone, see onOriginsAdded). */
+export function initSiteAccess(onEnabled?: (origins: string[]) => void): void {
   chrome.permissions.onAdded.addListener((p) => {
-    void onOriginsAdded(p.origins ?? []).catch(() => { /* reconcile retries on next start */ });
+    void onOriginsAdded(p.origins ?? []).then(
+      (origins) => { if (origins.length > 0) onEnabled?.(origins); },
+      () => { /* reconcile retries on next start */ },
+    );
   });
   chrome.permissions.onRemoved.addListener((p) => {
     const origins = p.origins ?? [];
