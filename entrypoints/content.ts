@@ -144,6 +144,14 @@ function runContentScript() {
   });
   (globalThis as Record<string, unknown>)[PROBE_KEY] = probe;
 
+  // Save hint: the background asks the top frame to point at the toolbar icon
+  // when the browser would not open the save popup by itself.
+  wireSaveHintReceiver({
+    ownId: chrome.runtime.id,
+    show: () => overlay.showNotice(t('saveHint')),
+    addListener: (cb) => chrome.runtime.onMessage.addListener(cb as any),
+  });
+
   // Popup-driven manual fill: the popup asks THIS frame to fill a chosen
   // entry. The secret is fetched + used here (never in the popup). The popup
   // targets the frame resolveFillFrame picked: the top frame, or a same-origin
@@ -204,6 +212,24 @@ export function wireSaveCapture(doc: Document, send: (cred: Captured) => void): 
     const forms = detectLoginForms(doc);
     captureFrom(forms.find((f) => f.password !== null && f.password.form === null));
   }, true);
+}
+
+// Save-hint receiver. Text only: nothing the page sees or clicks can commit a save.
+export interface SaveHintReceiverDeps {
+  ownId: string;
+  show: () => void;
+  addListener: (
+    cb: (msg: unknown, sender: { id?: string; tab?: unknown }, sendResponse: (r: { ok: boolean }) => void) => boolean | void,
+  ) => void;
+}
+
+export function wireSaveHintReceiver(deps: SaveHintReceiverDeps): void {
+  deps.addListener((msg, sender, sendResponse) => {
+    if (!sender || sender.id !== deps.ownId || sender.tab) return; // background only, never another frame
+    if ((msg as { type?: string } | null)?.type !== 'save-hint') return;
+    deps.show();
+    sendResponse({ ok: true });
+  });
 }
 
 // Popup-driven fill. Factored (deps injected) so the sender.id trust guard and

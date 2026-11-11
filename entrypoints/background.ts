@@ -14,6 +14,7 @@ import { routePickerMessage, type PickerBridgeDeps } from '../lib/picker-bridge'
 import { routeShortcutFill, type ShortcutFillDeps } from '../lib/shortcut-fill';
 import type { FillEntryResult } from '../lib/entry-picker';
 import { resolveFillFrame } from '../lib/frame-target';
+import { promptSave, shouldRetry, type SavePromptDeps } from '../lib/save-prompt';
 
 // The one native-port holder for the whole extension.
 export default defineBackground(() => {
@@ -87,6 +88,30 @@ export default defineBackground(() => {
   }
 
   const pending = new Map<number, Pending>();
+
+  // Auto-open the save popup after a capture (see lib/save-prompt.ts).
+  // promptedAt: tab -> capture time, for the one retry after the submit's navigation.
+  const promptedAt = new Map<number, number>();
+  const promptDeps: SavePromptDeps = {
+    getTab: async (tabId) => {
+      try {
+        const t = await chrome.tabs.get(tabId);
+        return { active: t.active, windowId: t.windowId };
+      } catch { return undefined; } // tab gone
+    },
+    isPopupOpen: async () => {
+      try {
+        const ctx = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.POPUP] });
+        return ctx.length > 0;
+      } catch { return false; } // getContexts missing: assume closed, openPopup copes
+    },
+    openPopup: async (windowId) => { await chrome.action.openPopup({ windowId }); },
+    showHint: (tabId) => new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'save-hint' }, { frameId: 0 }, (r?: { ok?: boolean }) =>
+        resolve(!chrome.runtime.lastError && r?.ok === true));
+    }),
+  };
+
   const saveDeps: SaveBridgeDeps = {
     ownId: chrome.runtime.id,
     request: (origin, action, payload) => pm.request(origin, action, payload),
@@ -99,6 +124,10 @@ export default defineBackground(() => {
       // Save cleared → restore the status dot (pending already deleted by the
       // caller, so refreshBadge won't skip).
       else void refreshBadge(tabId);
+    },
+    promptSave: (tabId) => {
+      promptedAt.set(tabId, Date.now());
+      void promptSave(tabId, promptDeps);
     },
     now: () => Date.now(),
     newToken: () =>
@@ -146,6 +175,7 @@ export default defineBackground(() => {
   // permission for). Read-time TTL + token supersession bound it otherwise.
   chrome.tabs.onRemoved.addListener((tabId) => {
     pending.delete(tabId);
+    promptedAt.delete(tabId);
     // Tab is gone; its per-tab icon dies with it — nothing to reset.
   });
   chrome.tabs.onUpdated.addListener((tabId, info) => {
@@ -157,6 +187,15 @@ export default defineBackground(() => {
         scheduleRefresh(tabId); // new origin: repaint status for the new page (coalesced with the settle listener)
       }
     } catch { /* unparseable url: leave it to the TTL */ }
+  });
+  // The submit's navigation can close the auto-opened popup or drop the page
+  // hint with the old page: retry once when the next page finishes loading.
+  chrome.tabs.onUpdated.addListener((tabId, info) => {
+    if (info.status !== 'complete') return;
+    const at = promptedAt.get(tabId);
+    if (at === undefined) return;
+    promptedAt.delete(tabId);
+    if (pending.has(tabId) && shouldRetry(at, Date.now())) void promptSave(tabId, promptDeps);
   });
 
   // Content scripts / popup send { type:'nmh-request', origin, action, payload }.

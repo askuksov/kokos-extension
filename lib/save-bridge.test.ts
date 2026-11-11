@@ -14,6 +14,7 @@ function makeDeps(over: Partial<SaveBridgeDeps> = {}): SaveBridgeDeps {
     isSaveIgnored: vi.fn(async () => false),
     addSaveIgnore: vi.fn(async () => {}),
     setBadge: vi.fn(),
+    promptSave: vi.fn(),
     now: () => 1000,
     newToken: () => 'tok',
     gate: newGateState(),
@@ -45,6 +46,7 @@ describe('save-capture', () => {
     const p = deps.pending.get(7)!;
     expect(p).toMatchObject({ username: 'alice', password: 'pw', url: 'https://a.com/login', origin: 'https://a.com', token: 'tok' });
     expect(deps.setBadge).toHaveBeenCalledWith(7, true);
+    expect(deps.promptSave).toHaveBeenCalledWith(7);
   });
   it('drops a capture from a site that is no longer enabled', async () => {
     const deps = makeDeps({ isEnabled: vi.fn(async () => false) });
@@ -52,6 +54,7 @@ describe('save-capture', () => {
     expect(res).toEqual({ ok: false });
     expect(deps.pending.size).toBe(0);
     expect(deps.setBadge).not.toHaveBeenCalled();
+    expect(deps.promptSave).not.toHaveBeenCalled();
   });
   it('checks site access against the trusted sender url, not the message body', async () => {
     const isEnabled = vi.fn(async () => true);
