@@ -1,6 +1,6 @@
 {
   "name": "kokos-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Save and autofill logins from the Kokos password manager.",
   "private": true,
   "type": "module",
