@@ -36,7 +36,9 @@ export default defineBackground(() => {
     void (async () => {
       if (await isPopupOpen()) return;
       const wanted = new Set(origins.map((o) => `${o}/*`));
-      const tabs = await chrome.tabs.query({ active: true });
+      // Only the window the user just granted from: another window's tab on
+      // the same site may hold an unfinished form.
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       for (const t of tabs) {
         if (typeof t.id !== 'number' || !t.url) continue;
         try { if (wanted.has(originPattern(t.url))) void chrome.tabs.reload(t.id); } catch { /* non-http url */ }
