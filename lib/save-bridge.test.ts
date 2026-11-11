@@ -187,3 +187,45 @@ describe('dismiss / never', () => {
     expect(deps.pending.has(7)).toBe(false);
   });
 });
+
+describe('save-capture — re-offer after the saved entry is deleted', () => {
+  const capture = { type: 'save-capture', username: 'alice', password: 'pw' };
+  const commitMsg = { type: 'commit-pending-save', tabId: 7 };
+
+  async function saveOnce(deps: SaveBridgeDeps) {
+    await routeSaveMessage(capture, csSender, deps);
+    const res = await routeSaveMessage(commitMsg, popupSender, deps);
+    expect(res).toMatchObject({ ok: true });
+    expect(deps.pending.size).toBe(0);
+  }
+
+  it('offers the same login again when the vault no longer has it', async () => {
+    const deps = makeDeps(); // get_logins -> no items: the entry is gone
+    await saveOnce(deps);
+    const res = await routeSaveMessage(capture, csSender, deps);
+    expect(res).toEqual({ ok: true });
+    expect(deps.pending.get(7)).toBeTruthy();
+  });
+  it('stays quiet while the vault still has that login', async () => {
+    const deps = makeDeps();
+    await saveOnce(deps);
+    deps.request = vi.fn(async () => ok({ items: [{ id: 'e1', title: 'a.com', username: ' Alice ' }] }));
+    const res = await routeSaveMessage(capture, csSender, deps);
+    expect(res).toEqual({ ok: false });
+    expect(deps.pending.size).toBe(0);
+  });
+  it('stays quiet when the app is locked (cannot tell)', async () => {
+    const deps = makeDeps();
+    await saveOnce(deps);
+    deps.request = vi.fn(async () => fail('locked'));
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: false });
+  });
+  it('keeps the plain dedupe after Not now, without asking the vault', async () => {
+    const deps = makeDeps();
+    await routeSaveMessage(capture, csSender, deps);
+    await routeSaveMessage({ type: 'dismiss-pending-save', tabId: 7 }, popupSender, deps);
+    (deps.request as any).mockClear();
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: false });
+    expect(deps.request).not.toHaveBeenCalled();
+  });
+});
