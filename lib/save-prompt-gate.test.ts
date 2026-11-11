@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newGateState, valueToken, shouldBadge, recordPrompt } from './save-prompt-gate';
+import { newGateState, valueToken, shouldBadge, recordPrompt, recordSaved, wasSaved, forgetSaved } from './save-prompt-gate';
 
 describe('save-prompt-gate', () => {
   const k = (token: string) => ({ origin: 'https://a.com', username: 'alice', token });
@@ -20,5 +20,18 @@ describe('save-prompt-gate', () => {
   it('valueToken is stable and distinguishes different values', () => {
     expect(valueToken('pw1')).toBe(valueToken('pw1'));
     expect(valueToken('pw1')).not.toBe(valueToken('pw2'));
+  });
+});
+
+describe('save-prompt-gate — saved values', () => {
+  const k = { origin: 'https://a.com', username: 'alice', token: valueToken('pw') };
+  it('remembers a saved value and forgets it on request', () => {
+    const s = newGateState();
+    expect(wasSaved(s, k)).toBe(false);
+    recordSaved(s, k);
+    expect(wasSaved(s, k)).toBe(true);
+    expect(wasSaved(s, { ...k, token: valueToken('other') })).toBe(false);
+    forgetSaved(s, k);
+    expect(wasSaved(s, k)).toBe(false);
   });
 });

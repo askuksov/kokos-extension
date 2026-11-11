@@ -6,7 +6,7 @@
 // to any caller (the popup receives metadata only) and never logs it.
 
 import { classifySave, clampSaveField } from './save-capture';
-import { valueToken, shouldBadge, recordPrompt, type GateState } from './save-prompt-gate';
+import { valueToken, shouldBadge, recordPrompt, recordSaved, wasSaved, forgetSaved, type GateState } from './save-prompt-gate';
 import type { NmhResponse, GetLoginsResult } from './nmh-client';
 
 const MAX_FIELD_CHARS = 256;    // matches the host's confirm-emit clamp
@@ -81,10 +81,19 @@ function livePending(tabId: number, deps: SaveBridgeDeps): Pending | null {
   return p;
 }
 
-async function itemsFor(p: Pending, deps: SaveBridgeDeps): Promise<{ resp: NmhResponse; items: GetLoginsResult['items'] }> {
+async function itemsFor(p: Pick<Pending, 'origin' | 'url'>, deps: SaveBridgeDeps): Promise<{ resp: NmhResponse; items: GetLoginsResult['items'] }> {
   const resp = await deps.request(p.origin, 'get_logins', { url: p.url });
   const items = resp.ok && resp.payload ? (resp.payload as GetLoginsResult).items ?? [] : [];
   return { resp, items };
+}
+
+// True when the vault holds a login with this username for the url. An app that
+// is locked or not running counts as "has it": keep the dedupe, never re-nag.
+async function vaultHasLogin(origin: string, url: string, username: string, deps: SaveBridgeDeps): Promise<boolean> {
+  const { resp, items } = await itemsFor({ origin, url }, deps);
+  if (!resp.ok) return true;
+  const key = username.trim().toLowerCase();
+  return items.some((i) => (i.username ?? '').trim().toLowerCase() === key);
 }
 
 async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: SaveBridgeDeps): Promise<{ ok: boolean }> {
@@ -97,8 +106,14 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   if (!(await deps.isEnabled(url))) return { ok: false };
   if (await deps.isSaveIgnored(url)) return { ok: false };
   const token = valueToken(msg.password);
-  if (!shouldBadge(deps.gate, { origin, username: msg.username, token })) return { ok: false };
-  recordPrompt(deps.gate, { origin, username: msg.username, token });
+  const key = { origin, username: msg.username, token };
+  if (!shouldBadge(deps.gate, key)) {
+    // Same value already offered this session. Offer again only when the user
+    // saved it and the vault no longer has that login (deleted in the app).
+    if (!wasSaved(deps.gate, key) || await vaultHasLogin(origin, url, msg.username, deps)) return { ok: false };
+    forgetSaved(deps.gate, key);
+  }
+  recordPrompt(deps.gate, key);
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);
   deps.promptSave(tabId);
@@ -132,6 +147,7 @@ async function commit(tabId: number, token: string | undefined, deps: SaveBridge
   // write clears the pending — the user said no.
   const code = out.error?.code;
   const keep = !out.ok && (code === 'locked' || code === 'no_vault' || code === 'app_not_running' || code === 'timeout');
+  if (out.ok) recordSaved(deps.gate, { origin: p.origin, username: p.username, token: valueToken(p.password) });
   if (!keep) { deps.pending.delete(tabId); deps.setBadge(tabId, false); }
   return out;
 }
