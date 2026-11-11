@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { originPattern, enableSite, disableSite, isEnabled, reconcile, listEnabledSites } from './site-access';
+import { originPattern, enableSite, disableSite, isEnabled, reconcile, listEnabledSites, siteOriginOf, onOriginsAdded } from './site-access';
 
 function installFakeChrome(granted: boolean) {
   const store: Record<string, any> = {};
@@ -10,11 +10,14 @@ function installFakeChrome(granted: boolean) {
       request: vi.fn(async ({ origins }: any) => { if (granted) origins.forEach((o: string) => perms.add(o)); return granted; }),
       remove: vi.fn(async ({ origins }: any) => { origins.forEach((o: string) => perms.delete(o)); return true; }),
       contains: vi.fn(async ({ origins }: any) => origins.every((o: string) => perms.has(o))),
+      getAll: vi.fn(async () => ({ origins: [...perms] })),
       onRemoved: { addListener: vi.fn() },
+      onAdded: { addListener: vi.fn() },
     },
     scripting: {
       registerContentScripts: vi.fn(async (s: any[]) => { registered.push(...s); }),
       unregisterContentScripts: vi.fn(async () => {}),
+      getRegisteredContentScripts: vi.fn(async ({ ids }: any) => registered.filter((r) => ids.includes(r.id))),
     },
     storage: {
       local: {
@@ -76,5 +79,55 @@ describe('ported-origin reconcile', () => {
     await enableSite('https://localhost:3000/login');
     await reconcile();
     expect(await isEnabled('https://localhost:3000/anything')).toBe(true);
+  });
+});
+
+describe('siteOriginOf', () => {
+  it('accepts an exact-host grant', () => {
+    expect(siteOriginOf('https://a.com/*')).toBe('https://a.com');
+    expect(siteOriginOf('http://localhost/*')).toBe('http://localhost');
+  });
+  it('rejects broad or odd patterns', () => {
+    for (const p of ['<all_urls>', '*://*/*', 'https://*.a.com/*', 'https://a.com/path/*', 'file:///*', 'https://a.com:8080/*']) {
+      expect(siteOriginOf(p)).toBeNull();
+    }
+  });
+});
+
+describe('onOriginsAdded (grant finished in the background)', () => {
+  it('registers and records an exact-host grant', async () => {
+    const ctx = installFakeChrome(true);
+    await onOriginsAdded(['https://a.com/*']);
+    expect(ctx.registered.map((r) => r.matches[0])).toEqual(['https://a.com/*']);
+    expect(await listEnabledSites()).toEqual(['https://a.com']);
+  });
+  it('ignores an all-sites grant', async () => {
+    const ctx = installFakeChrome(true);
+    await onOriginsAdded(['<all_urls>', '*://*/*']);
+    expect(ctx.registered).toEqual([]);
+    expect(await listEnabledSites()).toEqual([]);
+  });
+  it('does not duplicate a site the popup already enabled', async () => {
+    installFakeChrome(true);
+    await enableSite('https://a.com/login');
+    await onOriginsAdded(['https://a.com/*']);
+    expect(await listEnabledSites()).toEqual(['https://a.com']);
+  });
+  it('tolerates a duplicate-id race when the script is already registered', async () => {
+    const ctx = installFakeChrome(true);
+    await onOriginsAdded(['https://a.com/*']);
+    (chrome.scripting.registerContentScripts as any).mockRejectedValueOnce(new Error('Duplicate script ID'));
+    await expect(onOriginsAdded(['https://a.com/*'])).resolves.toBeUndefined();
+    expect(ctx.registered.length).toBe(1);
+  });
+});
+
+describe('reconcile picks up a missed grant', () => {
+  it('enables a granted exact host that is not in the list', async () => {
+    const ctx = installFakeChrome(true);
+    ctx.perms.add('https://b.com/*');
+    ctx.perms.add('<all_urls>');
+    await reconcile();
+    expect(await listEnabledSites()).toEqual(['https://b.com']);
   });
 });
