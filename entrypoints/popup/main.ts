@@ -270,8 +270,10 @@ async function render() {
   toggle.className = enabled ? '' : 'primary';
   toggle.onclick = async () => {
     toggle.disabled = true;
-    if (enabled) await disableSite(url); else await enableSite(url);
-    if (tab.id != null) chrome.tabs.reload(tab.id);
+    // Reload so the page gains or loses the content script, but only when
+    // something changed: a denied permission prompt leaves the page as it was.
+    const changed = enabled ? (await disableSite(url), true) : await enableSite(url);
+    if (changed && tab.id != null) chrome.tabs.reload(tab.id);
     await render();
   };
 

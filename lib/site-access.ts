@@ -37,14 +37,21 @@ async function setList(list: string[]): Promise<void> {
 async function registerFor(pattern: string): Promise<void> {
   const id = CS_ID_PREFIX + pattern;
   try { await chrome.scripting.unregisterContentScripts({ ids: [id] }); } catch { /* not registered yet */ }
-  await chrome.scripting.registerContentScripts([{
-    id,
-    matches: [pattern],
-    js: [contentScriptFile()],
-    allFrames: true,
-    runAt: 'document_idle',
-    persistAcrossSessions: true,
-  }]);
+  try {
+    await chrome.scripting.registerContentScripts([{
+      id,
+      matches: [pattern],
+      js: [contentScriptFile()],
+      allFrames: true,
+      runAt: 'document_idle',
+      persistAcrossSessions: true,
+    }]);
+  } catch (e) {
+    // The popup and the onAdded handler can both enable the same site at once;
+    // whoever registers second hits a duplicate id. Already registered is fine.
+    const got = await chrome.scripting.getRegisteredContentScripts({ ids: [id] }).catch(() => []);
+    if (got.length === 0) throw e;
+  }
 }
 
 async function unregisterFor(pattern: string): Promise<void> {
@@ -67,6 +74,26 @@ export async function disableSite(url: string): Promise<void> {
   try { await chrome.permissions.remove({ origins: [pattern] }); } catch { /* ignore */ }
 }
 
+// The origin of an exact-host grant (`https://host/*`), or null for anything
+// broader (`<all_urls>`, `*://*/*`, wildcard hosts): those come from the
+// browser's own site-access menu and must not enable every site at once.
+export function siteOriginOf(pattern: string): string | null {
+  const m = /^(https?):\/\/([^/*:]+)\/\*$/.exec(pattern);
+  return m ? `${m[1]}://${m[2]}` : null;
+}
+
+/** Finish enabling sites the user granted. Firefox closes the popup when the
+ * permission prompt opens, so enableSite never gets past its request there;
+ * the background completes the job from permissions.onAdded instead. */
+export async function onOriginsAdded(patterns: string[]): Promise<void> {
+  for (const pattern of patterns) {
+    const origin = siteOriginOf(pattern);
+    if (!origin) continue;
+    await registerFor(`${origin}/*`);
+    await setList([...(await getList()), origin]);
+  }
+}
+
 export async function isEnabled(url: string): Promise<boolean> {
   return (await getList()).includes(canonicalOrigin(url));
 }
@@ -81,9 +108,20 @@ export async function reconcile(): Promise<void> {
     if (await chrome.permissions.contains({ origins: [pattern] })) await registerFor(pattern);
     else await setList((await getList()).filter((o) => o !== origin));
   }
+  // A grant whose onAdded was missed (e.g. the worker died mid-enable) is
+  // finished here on the next start.
+  const listed = new Set(await getList());
+  const granted = (await chrome.permissions.getAll()).origins ?? [];
+  await onOriginsAdded(granted.filter((p) => {
+    const o = siteOriginOf(p);
+    return o !== null && !listed.has(o);
+  }));
 }
 
 export function initSiteAccess(): void {
+  chrome.permissions.onAdded.addListener((p) => {
+    void onOriginsAdded(p.origins ?? []).catch(() => { /* reconcile retries on next start */ });
+  });
   chrome.permissions.onRemoved.addListener((p) => {
     const origins = p.origins ?? [];
     void (async () => {
