@@ -88,6 +88,7 @@ export default defineBackground(() => {
   }
 
   const pending = new Map<number, Pending>();
+  const captureSeq = new Map<number, number>();
 
   // Auto-open the save popup after a capture (see lib/save-prompt.ts).
   // promptedAt: tab -> capture time, for the one retry after the submit's navigation.
@@ -134,6 +135,7 @@ export default defineBackground(() => {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
     gate: newGateState(),
     pending,
+    captureSeq,
   };
 
   const pickerDeps: PickerBridgeDeps = {
@@ -176,6 +178,7 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => {
     pending.delete(tabId);
     promptedAt.delete(tabId);
+    captureSeq.delete(tabId);
     // Tab is gone; its per-tab icon dies with it — nothing to reset.
   });
   chrome.tabs.onUpdated.addListener((tabId, info) => {
