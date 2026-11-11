@@ -147,6 +147,9 @@ export interface OverlayController {
   // the native confirm prompt can park for a full 60s, far past any timeout
   // that makes sense for a transient message.
   showToast(anchor: HTMLElement, text: string, ms?: number): void;
+  // Same toast pinned to the viewport's top-right corner, for messages with no
+  // field to anchor to (the page may have navigated since the event).
+  showNotice(text: string, ms?: number): void;
   hideToast(): void;
   hide(): void;
   destroy(): void;
@@ -223,8 +226,20 @@ export function createOverlay(doc: Document = document): OverlayController {
       if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
       toast.textContent = text; // display-only text node; closed shadow DOM hides it from the page
       const rect = anchor.getBoundingClientRect();
+      toast.style.position = '';
+      toast.style.right = '';
       toast.style.left = `${rect.left + view.scrollX}px`;
       toast.style.top = `${rect.bottom + view.scrollY + 4}px`;
+      toast.style.display = 'block';
+      if (ms > 0) toastTimer = view.setTimeout(() => { toastTimer = null; this.hideToast(); }, ms);
+    },
+    showNotice(text, ms = 8000) {
+      if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
+      toast.textContent = text;
+      toast.style.position = 'fixed';
+      toast.style.left = '';
+      toast.style.top = '16px';
+      toast.style.right = '16px';
       toast.style.display = 'block';
       if (ms > 0) toastTimer = view.setTimeout(() => { toastTimer = null; this.hideToast(); }, ms);
     },

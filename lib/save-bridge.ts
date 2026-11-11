@@ -57,6 +57,9 @@ export interface SaveBridgeDeps {
   isSaveIgnored(url: string): Promise<boolean>;
   addSaveIgnore(url: string): Promise<void>;
   setBadge(tabId: number, on: boolean): void;
+  // Bring a fresh capture in front of the user (auto-open popup or page hint).
+  // Fire-and-forget: the capture reply must not wait for UI.
+  promptSave(tabId: number): void;
   now(): number;
   newToken(): string;
   gate: GateState;
@@ -98,6 +101,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   recordPrompt(deps.gate, { origin, username: msg.username, token });
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);
+  deps.promptSave(tabId);
   return { ok: true };
 }
 

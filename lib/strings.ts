@@ -62,6 +62,8 @@ export const STRINGS = {
   // toasts are the only place the user is actually looking.
   awaitingApproval: 'Waiting for your approval in Kokos — switch to the app.',
   requestDenied: 'Denied in Kokos. Click the key icon to ask again.',
+  // page overlay — shown when the browser would not open the save popup itself
+  saveHint: 'Kokos can save this login — click the Kokos icon in the toolbar.',
   // options page
   optFillHeading: 'Sites where Kokos can fill',
   optSaveOffHeading: 'Saving turned off',
