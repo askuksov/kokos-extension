@@ -273,4 +273,25 @@ describe('save-capture — out-of-order completion', () => {
     expect(await repeatA).toEqual({ ok: false });
     expect(deps.pending.get(7)?.password).toBe('B');
   });
+
+  it('an older capture finishing its last consent check late does not replace a newer one', async () => {
+    // Capture A's second consent check hangs until released; B runs through meanwhile.
+    let releaseA!: (v: boolean) => void;
+    let calls = 0;
+    const deps = makeDeps({
+      hasConsent: vi.fn(() => {
+        calls++;
+        return calls === 2 ? new Promise<boolean>((r) => { releaseA = r; }) : Promise.resolve(true);
+      }),
+    });
+    const captureA = routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await vi.waitFor(() => expect(calls).toBe(2));
+
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'B' }, csSender, deps);
+    expect(deps.pending.get(7)?.password).toBe('B');
+
+    releaseA(true);
+    expect(await captureA).toEqual({ ok: false });
+    expect(deps.pending.get(7)?.password).toBe('B');
+  });
 });

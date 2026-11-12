@@ -129,6 +129,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   // Consent can be withdrawn while the checks above awaited storage: ask again
   // right before the password is held.
   if (await noConsent()) return { ok: false };
+  if (superseded()) return { ok: false }; // a newer capture landed during that await
   recordPrompt(deps.gate, key);
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);
