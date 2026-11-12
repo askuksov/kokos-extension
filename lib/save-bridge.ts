@@ -112,7 +112,8 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   const superseded = () => deps.captureSeq.get(tabId) !== seq;
   // Disabling a site does not stop content scripts already running in open tabs,
   // so a capture can still arrive from a site the user has turned off.
-  if (deps.hasConsent && !(await deps.hasConsent())) return { ok: false };
+  const noConsent = async () => !!deps.hasConsent && !(await deps.hasConsent());
+  if (await noConsent()) return { ok: false };
   if (!(await deps.isEnabled(url))) return { ok: false };
   if (await deps.isSaveIgnored(url)) return { ok: false };
   if (superseded()) return { ok: false };
@@ -125,6 +126,9 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
     if (superseded()) return { ok: false };
     forgetSaved(deps.gate, key);
   }
+  // Consent can be withdrawn while the checks above awaited storage: ask again
+  // right before the password is held.
+  if (await noConsent()) return { ok: false };
   recordPrompt(deps.gate, key);
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);

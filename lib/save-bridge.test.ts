@@ -76,6 +76,14 @@ describe('save-capture', () => {
     expect(isEnabled).not.toHaveBeenCalled();
     expect(deps.promptSave).not.toHaveBeenCalled();
   });
+  it('drops a capture when consent is withdrawn while the site checks run', async () => {
+    let calls = 0;
+    const deps = makeDeps({ hasConsent: vi.fn(async () => ++calls === 1) });
+    const res = await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);
+    expect(res).toEqual({ ok: false });
+    expect(deps.pending.size).toBe(0);
+    expect(deps.promptSave).not.toHaveBeenCalled();
+  });
   it('keeps a capture once consent is given', async () => {
     const deps = makeDeps({ hasConsent: vi.fn(async () => true) });
     await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);
