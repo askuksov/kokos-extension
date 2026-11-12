@@ -27,7 +27,7 @@ describe('dual-browser manifests', () => {
 
   it('Firefox MV3 manifest fixes the gecko id and uses background scripts', () => {
     const m = JSON.parse(readFileSync('.output/firefox-mv3/manifest.json', 'utf8'));
-    expect(m.browser_specific_settings.gecko.id).toBe('kokos@kuksov.dev');
+    expect(m.browser_specific_settings.gecko.id).toBe('kokos-password-manager@kuksov.dev');
     expect(m.browser_specific_settings.gecko.strict_min_version).toBe('140.0');
     expect(m.browser_specific_settings.gecko.data_collection_permissions).toEqual({
       required: ['authenticationInfo', 'browsingActivity'],

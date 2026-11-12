@@ -37,7 +37,7 @@ An administrator who has settled consent on the users' behalf can grant it in
   "policies": {
     "3rdparty": {
       "Extensions": {
-        "kokos@kuksov.dev": { "dataCollectionConsent": true }
+        "kokos-password-manager@kuksov.dev": { "dataCollectionConsent": true }
       }
     }
   }

@@ -27,7 +27,7 @@ export default defineConfig({
     },
     browser_specific_settings: {
       gecko: {
-        id: 'kokos@kuksov.dev',
+        id: 'kokos-password-manager@kuksov.dev',
         // 140.0 is the first release that shows the built-in consent prompt
         // for data_collection_permissions; older ones would skip it.
         strict_min_version: '140.0',
