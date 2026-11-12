@@ -244,6 +244,9 @@ export default defineBackground(() => {
       return true; // async sendResponse
     }
     if (type === 'get-consent') {
+      // Re-read on every ask: a page redrawing after a storage change must not
+      // race this worker's own onChanged reload and get the old state.
+      consent = loadConsent();
       void consent.then((state) => sendResponse({ state }));
       return true;
     }
