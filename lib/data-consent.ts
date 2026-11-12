@@ -54,11 +54,13 @@ export function consentAllows(state: ConsentState, action: string): boolean {
   return state !== 'required' || isFreeAction(action);
 }
 
-/** Browser-bound reader. Every read fails closed to "not set". */
+/** Browser-bound reader. The consent values fail closed to "not set". A failed
+ * install-type read rejects instead: an unknown install type would otherwise
+ * read as "not a policy install" and skip consent, so the caller falls back to
+ * 'required'. */
 export async function readConsentEnv(isFirefox: boolean): Promise<ConsentEnv> {
   if (!isFirefox) return { isFirefox, installType: undefined, managed: undefined, local: undefined };
-  let installType: string | undefined;
-  try { installType = (await chrome.management.getSelf()).installType; } catch { installType = undefined; }
+  const installType = (await chrome.management.getSelf()).installType;
   let managed: unknown;
   // storage.managed rejects when no policy sets anything for this add-on.
   try { managed = (await chrome.storage.managed.get(MANAGED_CONSENT_KEY))[MANAGED_CONSENT_KEY]; } catch { managed = undefined; }
