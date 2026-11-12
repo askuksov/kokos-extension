@@ -5,6 +5,9 @@ import { filterEntries, isNearExpiry, type PickerListResult, type PickerSecretRe
 import { t } from '../../lib/strings';
 import { resolveFillFrame } from '../../lib/frame-target';
 import { monogram } from '../../lib/monogram';
+import type { ConsentState } from '../../lib/data-consent';
+
+const PRIVACY_URL = 'https://kokos.kuksov.dev/en/privacy';
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -232,6 +235,38 @@ export function buildRow(tabId: number, it: LoginItem, status: HTMLElement): HTM
   return row;
 }
 
+// Disclosure and consent for a policy-installed Firefox add-on. Nothing that
+// carries user data reaches the app until the user agrees (the background gates it).
+function renderConsent(onAgreed: () => void): void {
+  const box = document.getElementById('consent')!;
+  box.textContent = '';
+  const head = document.createElement('div'); head.className = 'row'; head.textContent = t('consentTitle');
+  const intro = document.createElement('p'); intro.textContent = t('consentIntro');
+  const list = document.createElement('ul');
+  for (const key of ['consentItemAddress', 'consentItemLogins'] as const) {
+    const li = document.createElement('li'); li.textContent = t(key); list.appendChild(li);
+  }
+  const where = document.createElement('p'); where.textContent = t('consentWhere');
+  const link = document.createElement('a');
+  link.href = PRIVACY_URL; link.target = '_blank'; link.rel = 'noopener'; link.textContent = t('consentPolicy');
+  const status = document.createElement('div'); status.className = 'status hint';
+
+  const agree = document.createElement('button'); agree.className = 'primary'; agree.textContent = t('consentAgree');
+  agree.onclick = async () => {
+    agree.disabled = true;
+    const r = await send<{ ok: boolean; state?: ConsentState }>({ type: 'set-consent', granted: true });
+    if (r?.ok && r.state !== 'required') { box.textContent = ''; onAgreed(); }
+    else { agree.disabled = false; status.textContent = t('couldNotSave'); }
+  };
+  const later = document.createElement('button'); later.className = 'ghost'; later.textContent = t('notNow');
+  later.onclick = () => window.close();
+
+  const buttons = document.createElement('div'); buttons.className = 'save-actions';
+  buttons.append(agree, later);
+  const note = document.createElement('p'); note.textContent = t('consentLater');
+  box.append(head, intro, list, where, link, buttons, note, status);
+}
+
 // Header pill: is the app reachable, and is the vault open.
 function showState(state: 'ready' | 'locked' | 'offline'): void {
   const el = document.getElementById('state');
@@ -247,6 +282,16 @@ async function render() {
   const siteEl = document.getElementById('site')!;
   const hintEl = document.getElementById('hint')!;
   const listEl = document.getElementById('list')!;
+  const consent = await send<{ state: ConsentState }>({ type: 'get-consent' });
+  if (consent?.state === 'required') {
+    siteEl.textContent = '';
+    hintEl.textContent = ''; listEl.textContent = '';
+    document.getElementById('save')!.textContent = '';
+    const foot = document.querySelector<HTMLElement>('.foot');
+    if (foot) foot.hidden = true;
+    renderConsent(() => { if (foot) foot.hidden = false; void render(); });
+    return;
+  }
   if (!tab?.url || !/^https?:/.test(tab.url)) {
     siteEl.textContent = t('noFillableSite'); toggle.style.display = 'none'; listEl.textContent = '';
     return;

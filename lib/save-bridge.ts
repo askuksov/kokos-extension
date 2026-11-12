@@ -54,6 +54,9 @@ export interface SaveBridgeDeps {
   ownId: string;
   request(origin: string, action: string, payload: object): Promise<NmhResponse>;
   isEnabled(url: string): Promise<boolean>;
+  // False while a policy-installed Firefox add-on waits for data-sharing
+  // consent: a capture is then dropped, not held. Absent = consent not needed.
+  hasConsent?(): Promise<boolean>;
   isSaveIgnored(url: string): Promise<boolean>;
   addSaveIgnore(url: string): Promise<void>;
   setBadge(tabId: number, on: boolean): void;
@@ -109,6 +112,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   const superseded = () => deps.captureSeq.get(tabId) !== seq;
   // Disabling a site does not stop content scripts already running in open tabs,
   // so a capture can still arrive from a site the user has turned off.
+  if (deps.hasConsent && !(await deps.hasConsent())) return { ok: false };
   if (!(await deps.isEnabled(url))) return { ok: false };
   if (await deps.isSaveIgnored(url)) return { ok: false };
   if (superseded()) return { ok: false };

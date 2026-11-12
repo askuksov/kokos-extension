@@ -21,6 +21,31 @@ Neither the extension nor the host makes any network request.
 Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/kokos/bomiboipfgkkpdpdgpnanimjkilabddb).
 The Firefox listing will be linked here once published.
 
+## Enterprise installs (Firefox)
+
+Firefox asks for consent to the extension's data handling when a person
+installs it. When an administrator installs it through the `ExtensionSettings`
+policy, Firefox skips that prompt, so the extension asks itself: until the
+user agrees in its toolbar popup, it sends no page address and no login to the
+app. The user can withdraw on the extension's settings page.
+
+An administrator who has settled consent on the users' behalf can grant it in
+`policies.json`:
+
+```json
+{
+  "policies": {
+    "3rdparty": {
+      "Extensions": {
+        "kokos@kuksov.dev": { "dataCollectionConsent": true }
+      }
+    }
+  }
+}
+```
+
+The value is `true` (a macOS configuration profile delivers it as `1`, which also counts). Chrome is not affected.
+
 ## Develop
 
 Requires Node.js 22.13 or later.

@@ -32,6 +32,10 @@ describe('mapErrCode', () => {
   it("'locked' → locked probe", () => {
     expect(mapErrCode('locked')).toEqual({ kind: 'locked' });
   });
+  it("'consent_required' → needs-consent probe, painted blue", () => {
+    expect(mapErrCode('consent_required')).toEqual({ kind: 'needs-consent' });
+    expect(resolveBadge({ kind: 'needs-consent' }).dot).not.toBeNull();
+  });
   it('any other code → not-running', () => {
     expect(mapErrCode('app_not_running')).toEqual({ kind: 'not-running' });
     expect(mapErrCode('internal')).toEqual({ kind: 'not-running' });

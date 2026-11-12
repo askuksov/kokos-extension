@@ -7,6 +7,7 @@ export type Probe =
   | { kind: 'not-running' }
   | { kind: 'locked' }
   | { kind: 'no-permission' }
+  | { kind: 'needs-consent' }
   | { kind: 'permitted'; count: number };
 
 export interface BadgeVisual {
@@ -29,6 +30,8 @@ export function resolveBadge(probe: Probe | null): BadgeVisual {
       return { dot: GRAY, title: t('badgeLocked') };
     case 'no-permission':
       return { dot: BLUE, title: t('badgeNoPermission') };
+    case 'needs-consent':
+      return { dot: BLUE, title: t('badgeNeedsConsent') };
     case 'permitted': {
       const n = probe.count;
       // Green ONLY when there is at least one login to fill; amber = enabled
@@ -39,8 +42,11 @@ export function resolveBadge(probe: Probe | null): BadgeVisual {
   }
 }
 
-/** Interpret a get_logins failure on an enabled site: only 'locked' is locked;
- * every other code (app_not_running, internal, timeout…) means unreachable. */
+/** Interpret a get_logins failure on an enabled site: 'locked' is locked,
+ * 'consent_required' means the user has not agreed to data sharing yet; every
+ * other code (app_not_running, internal, timeout…) means unreachable. */
 export function mapErrCode(code: string | undefined): Probe {
-  return code === 'locked' ? { kind: 'locked' } : { kind: 'not-running' };
+  if (code === 'locked') return { kind: 'locked' };
+  if (code === 'consent_required') return { kind: 'needs-consent' };
+  return { kind: 'not-running' };
 }

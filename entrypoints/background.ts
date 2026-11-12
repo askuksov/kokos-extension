@@ -15,11 +15,23 @@ import { routeShortcutFill, type ShortcutFillDeps } from '../lib/shortcut-fill';
 import type { FillEntryResult } from '../lib/entry-picker';
 import { resolveFillFrame } from '../lib/frame-target';
 import { promptSave, shouldRetry, type SavePromptDeps } from '../lib/save-prompt';
+import {
+  consentAllows, consentState, readConsentEnv, setLocalConsent, LOCAL_CONSENT_KEY,
+  MANAGED_CONSENT_KEY, type ConsentState,
+} from '../lib/data-consent';
 
 // The one native-port holder for the whole extension.
 export default defineBackground(() => {
+  // Data-sharing consent (Firefox policy installs only, see lib/data-consent.ts).
+  // Every native request waits for the first read, so nothing slips out early.
+  const loadConsent = (): Promise<ConsentState> =>
+    readConsentEnv(import.meta.env.FIREFOX).then(consentState, () => 'required' as const);
+  let consent = loadConsent();
+  const hasConsent = async (): Promise<boolean> => (await consent) !== 'required';
+
   const pm = new PortManager(
     (host) => chrome.runtime.connectNative(host) as unknown as NativePort,
+    { allow: async (action) => consentAllows(await consent, action) },
   );
 
   async function isPopupOpen(): Promise<boolean> {
@@ -134,6 +146,7 @@ export default defineBackground(() => {
     ownId: chrome.runtime.id,
     request: (origin, action, payload) => pm.request(origin, action, payload),
     isEnabled,
+    hasConsent,
     isSaveIgnored,
     addSaveIgnore,
     setBadge: (tabId, on) => {
@@ -230,6 +243,26 @@ export default defineBackground(() => {
       );
       return true; // async sendResponse
     }
+    if (type === 'get-consent') {
+      void consent.then((state) => sendResponse({ state }));
+      return true;
+    }
+    if (type === 'set-consent') {
+      // Only the extension's own pages (popup, options) may record consent. Told
+      // apart by the sender's address, not by sender.tab: Firefox shows the
+      // options page inside the about:addons tab, so it has a tab too. A content
+      // script always reports the web page's address.
+      const ownPage = sender.id === chrome.runtime.id
+        && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+      if (!ownPage) { sendResponse({ ok: false }); return false; }
+      const granted = (msg as { granted?: unknown }).granted === true;
+      void setLocalConsent(granted).then(async () => {
+        consent = loadConsent();
+        sendResponse({ ok: true, state: await consent });
+        refreshActiveTab();
+      }, () => sendResponse({ ok: false }));
+      return true;
+    }
     if (type === 'list-site-logins' || type === 'copy-secret' || type === 'copy-totp') {
       routePickerMessage(msg, sender, pickerDeps).then(
         (res) => sendResponse(res ?? { ok: false, code: 'bad_request' }),
@@ -256,8 +289,20 @@ export default defineBackground(() => {
     });
   });
   // Initial paint on service-worker start.
-  void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
-    if (typeof t?.id === 'number') void refreshBadge(t.id);
+  function refreshActiveTab(): void {
+    void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
+      if (typeof t?.id === 'number') void refreshBadge(t.id);
+    });
+  }
+  refreshActiveTab();
+
+  // Consent changed elsewhere (another window's popup, or the administrator's
+  // policy): re-read it and repaint.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if ((area === 'local' && LOCAL_CONSENT_KEY in changes) || (area === 'managed' && MANAGED_CONSENT_KEY in changes)) {
+      consent = loadConsent();
+      refreshActiveTab();
+    }
   });
 
   // Dev smoke hook — no sender, so no trusted frame; reads only, never a secret.
