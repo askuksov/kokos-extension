@@ -9,7 +9,7 @@
 // Until consent is given, nothing that carries user data goes to the app:
 // see FREE_ACTIONS and the gate in PortManager.
 
-/** policies.json: 3rdparty > Extensions > kokos@kuksov.dev > dataCollectionConsent: true */
+/** policies.json: 3rdparty > Extensions > kokos-password-manager@kuksov.dev > dataCollectionConsent: true */
 export const MANAGED_CONSENT_KEY = 'dataCollectionConsent';
 /** storage.local: 'granted' after the user clicked Agree in the popup. */
 export const LOCAL_CONSENT_KEY = 'dataConsent';
