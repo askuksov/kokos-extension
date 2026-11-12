@@ -2,6 +2,7 @@ import {
   buildRequest, isKeepaliveId, KEEPALIVE_PREFIX, NATIVE_HOST, PROTOCOL_VERSION,
   type NmhResponse,
 } from './nmh-client';
+import { CONSENT_REQUIRED } from './data-consent';
 
 // The subset of chrome.runtime.Port this module uses. Declared locally so the
 // module stays pure and unit-testable with a fake (chrome.runtime.connectNative
@@ -31,7 +32,9 @@ export class PortManager {
 
   constructor(
     private connect: ConnectNative,
-    private opts: { keepaliveMs?: number } = {},
+    // allow: a gate asked before every request. A refused (or throwing) gate
+    // resolves a consent_required envelope and nothing reaches the app.
+    private opts: { keepaliveMs?: number; allow?: (action: string) => boolean | Promise<boolean> } = {},
   ) {}
 
   get openOrigins(): string[] {
@@ -42,8 +45,19 @@ export class PortManager {
     // Never throws or rejects: every failure resolves an app_not_running
     // envelope carrying the request's id, so an async caller can never hang
     // waiting on this promise.
+    const req = buildRequest(action, payload);
+    const allow = this.opts.allow;
+    if (!allow) return this.send(origin, req);
+    return Promise.resolve()
+      .then(() => allow(action))
+      .catch(() => false)
+      .then((ok) => ok
+        ? this.send(origin, req)
+        : errEnvelope(req.id, CONSENT_REQUIRED, 'data sharing not agreed'));
+  }
+
+  private send(origin: string, req: ReturnType<typeof buildRequest>): Promise<NmhResponse> {
     return new Promise<NmhResponse>((resolve) => {
-      const req = buildRequest(action, payload);
       let state: OriginState;
       try {
         state = this.ensure(origin); // connect() may throw synchronously

@@ -192,4 +192,32 @@ describe('PortManager onDisconnect generation guard', () => {
     expect(pm.openOrigins).toContain('https://a.com'); // #1 still alive
     expect(ports[1]!.port.disconnect).not.toHaveBeenCalled();
   });
+
+  it('refuses a request the gate denies, without opening a port', async () => {
+    let connects = 0;
+    const pm = new PortManager(() => { connects++; return makeFakePort().port; }, { allow: () => false });
+    const r = await pm.request('https://a.com', 'get_logins', { url: 'https://a.com' });
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('consent_required');
+    expect(connects).toBe(0);
+  });
+
+  it('fails closed when the gate throws', async () => {
+    const f = makeFakePort();
+    const pm = new PortManager(() => f.port, { allow: () => { throw new Error('boom'); } });
+    const r = await pm.request('https://a.com', 'save_login', { url: 'https://a.com' });
+    expect(r.error?.code).toBe('consent_required');
+    expect(f.sent).toHaveLength(0);
+  });
+
+  it('sends a request the async gate allows', async () => {
+    const f = makeFakePort();
+    const pm = new PortManager(() => f.port, { allow: async (a) => a === 'get_status' });
+    const p = pm.request('https://a.com', 'get_status', {});
+    await vi.waitFor(() => expect(f.lastRealRequest()?.action).toBe('get_status'));
+    const req = f.lastRealRequest();
+    f.reply({ id: req.id, ok: true, payload: { running: true, locked: false } });
+    await expect(p).resolves.toMatchObject({ ok: true });
+  });
 });
+

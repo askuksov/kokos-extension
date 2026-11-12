@@ -67,6 +67,20 @@ describe('save-capture', () => {
     );
     expect(isEnabled).toHaveBeenCalledWith('https://a.com/login');
   });
+  it('drops a capture while data-sharing consent is missing, before any other check', async () => {
+    const isEnabled = vi.fn(async () => true);
+    const deps = makeDeps({ hasConsent: vi.fn(async () => false), isEnabled });
+    const res = await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);
+    expect(res).toEqual({ ok: false });
+    expect(deps.pending.size).toBe(0);
+    expect(isEnabled).not.toHaveBeenCalled();
+    expect(deps.promptSave).not.toHaveBeenCalled();
+  });
+  it('keeps a capture once consent is given', async () => {
+    const deps = makeDeps({ hasConsent: vi.fn(async () => true) });
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);
+    expect(deps.pending.has(7)).toBe(true);
+  });
   it('drops when the origin is on the never-save list', async () => {
     const deps = makeDeps({ isSaveIgnored: vi.fn(async () => true) });
     await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'pw' }, csSender, deps);

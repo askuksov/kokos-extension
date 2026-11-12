@@ -45,7 +45,7 @@ body { width: 340px; background: var(--bg-app); }
 .state.locked::before { background: var(--warn); }
 
 .body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-.body:has(#hint:empty):has(#save:empty):has(#list:empty) { display: none; }
+.body:has(#consent:empty):has(#hint:empty):has(#save:empty):has(#list:empty) { display: none; }
 
 .hint {
   color: var(--warn);
@@ -116,3 +116,21 @@ body { width: 340px; background: var(--bg-app); }
 
 .foot { padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--bg-panel); }
 .foot button { width: 100%; }
+
+/* Data-sharing consent (Firefox, installed by policy): replaces the popup body. */
+#consent:empty { display: none; }
+#consent {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 1px var(--accent-soft), var(--shadow-card);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#consent .row { font-weight: 600; }
+#consent p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.45; }
+#consent ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 12px; line-height: 1.45; }
+#consent a { color: var(--accent); font-size: 12px; }
+#consent .save-actions { display: flex; gap: 6px; }
+#consent .save-actions button { flex: 1 1 0; font-size: 12px; }

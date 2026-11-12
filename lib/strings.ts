@@ -64,6 +64,20 @@ export const STRINGS = {
   requestDenied: 'Denied in Kokos. Click the key icon to ask again.',
   // page overlay — shown when the browser would not open the save popup itself
   saveHint: 'Kokos can save this login — click the Kokos icon in the toolbar.',
+  // popup + options — data sharing consent (Firefox, installed by policy)
+  consentTitle: 'Agree to data sharing',
+  consentIntro: 'Your organization installed Kokos. Before it can fill or save logins, it needs your agreement to pass this data to the Kokos app:',
+  consentItemAddress: 'the address of the active tab, to find matching logins;',
+  consentItemLogins: 'usernames and passwords on sites you enable, to fill and save them.',
+  consentWhere: 'The data goes only to the Kokos Password Manager app on this computer, never to the developer or anyone else.',
+  consentPolicy: 'Privacy policy',
+  consentAgree: 'Agree',
+  consentLater: 'You can withdraw later in the extension settings.',
+  optConsentHeading: 'Data sharing',
+  optConsentGranted: 'You agreed to pass page addresses and logins to the Kokos app.',
+  optConsentRequired: 'Not agreed. Kokos stays inactive until you agree.',
+  optConsentManaged: 'Agreed by your organization’s policy.',
+  optConsentWithdraw: 'Withdraw',
   // options page
   optFillHeading: 'Sites where Kokos can fill',
   optSaveOffHeading: 'Saving turned off',
@@ -76,6 +90,7 @@ export const STRINGS = {
   badgeNotRunning: 'Kokos — app not running',
   badgeLocked: 'Kokos — locked',
   badgeNoPermission: 'Kokos — click to enable here',
+  badgeNeedsConsent: 'Kokos — open to review data sharing',
   badgeNoLogins: 'Kokos — no logins for this site yet',
   badgeLoginsOne: 'Kokos — 1 login for this site',
   badgeLoginsMany: 'Kokos — {0} logins for this site',
