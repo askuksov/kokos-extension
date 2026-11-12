@@ -1,7 +1,7 @@
 {
   "name": "kokos-extension",
   "version": "0.1.2",
-  "description": "Save and autofill logins from the Kokos password manager.",
+  "description": "Save and autofill logins from Kokos Password Manager, the local-first encrypted vault.",
   "private": true,
   "type": "module",
   "license": "MIT",

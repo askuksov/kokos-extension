@@ -10,8 +10,8 @@ export default defineConfig({
   // consistent with the gecko strict_min_version below (140.0 has MV3 support).
   manifestVersion: 3,
   manifest: {
-    name: 'Kokos',
-    description: 'Save and autofill logins from the Kokos password manager.',
+    name: 'Kokos Password Manager',
+    description: 'Save and autofill logins from Kokos Password Manager, the local-first encrypted vault.',
     permissions: ['nativeMessaging', 'storage', 'scripting', 'activeTab', 'tabs'],
     optional_host_permissions: ['<all_urls>'],
     action: {
