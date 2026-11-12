@@ -2,7 +2,7 @@ import { listEnabledSites, disableSite } from '../../lib/site-access';
 import { listIgnoredSaveSites, removeSaveIgnore } from '../../lib/save-ignore';
 import { buildSiteRow } from '../../lib/options-view';
 import { t } from '../../lib/strings';
-import type { ConsentState } from '../../lib/data-consent';
+import { LOCAL_CONSENT_KEY, MANAGED_CONSENT_KEY, type ConsentState } from '../../lib/data-consent';
 
 function send<T>(message: object): Promise<T | undefined> {
   return new Promise((resolve) => chrome.runtime.sendMessage(message, (r: T) => resolve(chrome.runtime.lastError ? undefined : r)));
@@ -59,6 +59,14 @@ function main(): void {
   document.getElementById('fill-h')!.textContent = t('optFillHeading');
   document.getElementById('save-h')!.textContent = t('optSaveOffHeading');
   void renderConsent();
+  // Consent can change while this page is open (Agree in the popup, a new
+  // policy): redraw on the storage change and whenever the page is shown again.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if ((area === 'local' && LOCAL_CONSENT_KEY in changes) || (area === 'managed' && MANAGED_CONSENT_KEY in changes)) {
+      void renderConsent();
+    }
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void renderConsent(); });
   void renderList('fill-list', listEnabledSites, t('optDisable'), disableSite);
   void renderList('save-list', listIgnoredSaveSites, t('optReEnable'), removeSaveIgnore);
 }

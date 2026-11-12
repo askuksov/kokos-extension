@@ -250,6 +250,7 @@ function renderConsent(onAgreed: () => void): void {
   const link = document.createElement('a');
   link.href = PRIVACY_URL; link.target = '_blank'; link.rel = 'noopener'; link.textContent = t('consentPolicy');
   const status = document.createElement('div'); status.className = 'status hint';
+  status.setAttribute('role', 'status');
 
   const agree = document.createElement('button'); agree.className = 'primary'; agree.textContent = t('consentAgree');
   agree.onclick = async () => {
