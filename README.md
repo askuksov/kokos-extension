@@ -18,7 +18,8 @@ Neither the extension nor the host makes any network request.
    native-messaging host for your browser.
 3. Install the extension and add its id to the allowed list on the same page.
 
-Store listings will be linked here once published.
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/kokos/bomiboipfgkkpdpdgpnanimjkilabddb).
+The Firefox listing will be linked here once published.
 
 ## Develop
 
