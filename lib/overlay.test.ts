@@ -75,6 +75,15 @@ describe('iconLeftAvoiding', () => {
     expect(iconLeftAvoiding(field, document, null)).toBe(180 - 20 - 4); // the button's edge, not the glyph's
   });
 
+  it('moves left of a control that covers only the icon\'s right part', () => {
+    // Icon spans 186..206; a button at 200..210 misses the centre (196).
+    let field!: HTMLInputElement;
+    const s = setup((x) => (x >= 200 ? [s.eye] : [field]));
+    stubRect(s.eye, { left: 200, top: 12, width: 10, height: 20, right: 210, bottom: 32 });
+    field = s.field as HTMLInputElement;
+    expect(iconLeftAvoiding(field, document, null)).toBe(200 - 20 - 4);
+  });
+
   it('ignores our own host', () => {
     const host = document.createElement('div');
     const { field } = setup(() => []);

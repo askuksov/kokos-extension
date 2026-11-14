@@ -114,14 +114,26 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
   const original = rect.left + rect.width - ICON_SIZE - 4;
   if (typeof doc.elementsFromPoint !== 'function') return original;
   const cy = rect.top + rect.height / 2;
-  let left = original;
-  for (let i = 0; i < 3; i++) {
-    const top = doc.elementsFromPoint(left + ICON_SIZE / 2, cy).find((e) => e !== exclude);
-    if (!top || top === field || top.contains(field)) return left;
+  // The page control (if any) drawn at x; null when the field itself is there.
+  const controlAt = (x: number): Element | null => {
+    const top = doc.elementsFromPoint(x, cy).find((e) => e !== exclude);
+    if (!top || top === field || top.contains(field)) return null;
     // The whole button, not just the glyph inside it.
     const control = top.closest('button, [role="button"]') ?? top.closest('svg') ?? top;
-    if (control.contains(field)) return left;
-    left = control.getBoundingClientRect().left - ICON_SIZE - 4;
+    return control.contains(field) ? null : control;
+  };
+  let left = original;
+  for (let i = 0; i < 3; i++) {
+    // Both edges and the centre: a control can cover part of the icon only.
+    let blockedAt: number | null = null;
+    for (const x of [left + 1, left + ICON_SIZE / 2, left + ICON_SIZE - 1]) {
+      const control = controlAt(x);
+      if (!control) continue;
+      const l = control.getBoundingClientRect().left;
+      blockedAt = blockedAt === null ? l : Math.min(blockedAt, l);
+    }
+    if (blockedAt === null) return left;
+    left = blockedAt - ICON_SIZE - 4;
     if (left < rect.left) return original; // no free room inside the field
   }
   return left;
