@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { isFillableGeometry, positionFor, renderMatches, createOverlay, type OverlayMatch } from './overlay';
+import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, type OverlayMatch } from './overlay';
 
 function stubRect(el: Element, rect: Partial<DOMRect>): void {
   (el as any).getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 30, right: 100, bottom: 30, x: 0, y: 0, toJSON() {}, ...rect });
@@ -37,6 +37,59 @@ describe('positionFor', () => {
   });
 });
 
+describe('iconLeftAvoiding', () => {
+  // Field 10..210 x 10..34; the icon's default spot is left = 210 - 20 - 4 = 186.
+  function setup(atPoint: (x: number) => Element[]) {
+    document.body.innerHTML = '';
+    const wrap = document.createElement('div');
+    const field = document.createElement('input');
+    const eye = document.createElement('button');
+    wrap.append(field, eye);
+    document.body.appendChild(wrap);
+    stubRect(field, { left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34 });
+    stubRect(eye, { left: 180, top: 12, width: 24, height: 20, right: 204, bottom: 32 });
+    (document as any).elementsFromPoint = vi.fn((x: number) => atPoint(x).concat(wrap, document.body));
+    return { field, eye, wrap };
+  }
+
+  it('keeps the right-edge spot when the field itself is on top', () => {
+    const { field } = setup(() => []);
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(186);
+  });
+
+  it('moves left of a show-password button drawn over the edge', () => {
+    let field!: HTMLInputElement;
+    const s = setup((x) => (x >= 180 ? [s.eye] : [field]));
+    field = s.field as HTMLInputElement;
+    expect(iconLeftAvoiding(field, document, null)).toBe(180 - 20 - 4);
+  });
+
+  it('treats an svg inside the button as the button', () => {
+    let field!: HTMLInputElement;
+    const s = setup((x) => (x >= 180 ? [svg] : [field]));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.eye.appendChild(svg);
+    stubRect(svg, { left: 186, top: 14, width: 12, height: 12, right: 198, bottom: 26 });
+    field = s.field as HTMLInputElement;
+    expect(iconLeftAvoiding(field, document, null)).toBe(180 - 20 - 4); // the button's edge, not the glyph's
+  });
+
+  it('ignores our own host', () => {
+    const host = document.createElement('div');
+    const { field } = setup(() => []);
+    (document as any).elementsFromPoint = vi.fn(() => [host, field]);
+    expect(iconLeftAvoiding(field, document, host)).toBe(186);
+  });
+
+  it('falls back to the edge when there is no room left of the control', () => {
+    const { field, eye } = setup(() => []);
+    stubRect(eye, { left: 15, top: 12, width: 190, height: 20, right: 205, bottom: 32 });
+    (document as any).elementsFromPoint = vi.fn(() => [eye]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(186);
+  });
+});
+
 describe('renderMatches', () => {
   const matches: OverlayMatch[] = [
     { id: 'a', title: 'Aliexpress', username: 'askuksov', hasTotp: false },
@@ -70,6 +123,54 @@ describe('createOverlay', () => {
     expect(host.shadowRoot).toBeNull(); // closed shadow: page cannot read it
     ov.destroy();
     expect(document.documentElement.contains(host)).toBe(false);
+  });
+
+  // A React SPA recovering from a hydration error replaces <html>, taking
+  // the host with it (Plane does this).
+  function overlayHost(): HTMLElement | undefined {
+    return Array.from(document.documentElement.children)
+      .find((h) => (h as HTMLElement).style?.zIndex === '2147483647') as HTMLElement | undefined;
+  }
+  function visibleField(): HTMLInputElement {
+    document.body.innerHTML = '';
+    const field = document.createElement('input');
+    field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
+    document.body.appendChild(field);
+    (document as any).elementFromPoint = () => field;
+    return field;
+  }
+
+  it('re-attaches a host the page removed before showing the icon', () => {
+    const field = visibleField();
+    const ov = createOverlay(document);
+    const host = overlayHost()!;
+    host.remove(); // the old <html> left the document with the host in it
+    ov.showIcon(field, () => {});
+    expect(host.isConnected).toBe(true);
+    expect(host.parentNode).toBe(document.documentElement);
+    ov.destroy();
+  });
+
+  it('re-attaches a removed host for the toast and the notice too', () => {
+    const field = visibleField();
+    const ov = createOverlay(document);
+    const host = overlayHost()!;
+    host.remove();
+    ov.showToast(field, 'x');
+    expect(host.isConnected).toBe(true);
+    host.remove();
+    ov.showNotice('y');
+    expect(host.isConnected).toBe(true);
+    ov.destroy();
+  });
+
+  it('does not re-attach after destroy', () => {
+    const field = visibleField();
+    const ov = createOverlay(document);
+    const host = overlayHost()!;
+    ov.destroy();
+    ov.showIcon(field, () => {});
+    expect(host.isConnected).toBe(false);
   });
 });
 

@@ -139,7 +139,10 @@ function runContentScript(filled: FillMemory) {
   // invalidate an in-flight, user-confirmed fill — supersession is tracked by
   // offer/onPick bumping `gen`, and a replaced field is caught by isConnected
   // (target-field identity + a counter, not a raw mutation counter).
-  watch(document.documentElement, () => { scan(); });
+  // Observes the Document, not <html>: a page that swaps out its root element
+  // (seen on a React SPA that recovers from a hydration error) would leave an
+  // observer on the old <html> silent, and the icon would never come back.
+  watch(document, () => { scan(); });
 
   // Lets the popup and the shortcut find the frame that holds the form. Lives in
   // the extension's isolated world, invisible to the page.
