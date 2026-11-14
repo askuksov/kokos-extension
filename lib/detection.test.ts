@@ -72,6 +72,21 @@ describe('watch', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(cb).not.toHaveBeenCalled();
   });
+
+  it('keeps firing on a Document after the page replaces <html>', async () => {
+    const doc = document.implementation.createHTMLDocument('t');
+    const cb = vi.fn();
+    const stop = watch(doc, cb);
+    const fresh = doc.createElement('html');
+    fresh.appendChild(doc.createElement('body'));
+    doc.replaceChild(fresh, doc.documentElement);
+    await new Promise((r) => setTimeout(r, 0));
+    cb.mockClear();
+    doc.body.appendChild(doc.createElement('input')); // the form a SPA renders afterwards
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cb).toHaveBeenCalled();
+    stop();
+  });
 });
 
 describe('sameOriginAsTop', () => {

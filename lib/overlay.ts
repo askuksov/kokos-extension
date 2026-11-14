@@ -105,6 +105,28 @@ export function positionFor(rect: { left: number; top: number; width: number; he
   };
 }
 
+// Viewport `left` for an icon at the field's right edge, moved left past any
+// page control drawn over that edge (a show-password eye, a clear button):
+// sitting on top of it would hide it and swallow its clicks. `exclude` is our
+// own host, which elementsFromPoint reports for anything in the shadow root.
+export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element | null): number {
+  const rect = field.getBoundingClientRect();
+  const original = rect.left + rect.width - ICON_SIZE - 4;
+  if (typeof doc.elementsFromPoint !== 'function') return original;
+  const cy = rect.top + rect.height / 2;
+  let left = original;
+  for (let i = 0; i < 3; i++) {
+    const top = doc.elementsFromPoint(left + ICON_SIZE / 2, cy).find((e) => e !== exclude);
+    if (!top || top === field || top.contains(field)) return left;
+    // The whole button, not just the glyph inside it.
+    const control = top.closest('button, [role="button"]') ?? top.closest('svg') ?? top;
+    if (control.contains(field)) return left;
+    left = control.getBoundingClientRect().left - ICON_SIZE - 4;
+    if (left < rect.left) return original; // no free room inside the field
+  }
+  return left;
+}
+
 export function renderMatches(container: HTMLElement | ShadowRoot, matches: OverlayMatch[], onPick: (m: OverlayMatch) => void): void {
   while (container.firstChild) container.removeChild(container.firstChild);
   const doc = container instanceof ShadowRoot ? container.host.ownerDocument : container.ownerDocument;
@@ -187,6 +209,16 @@ export function createOverlay(doc: Document = document): OverlayController {
   root.append(style, ui);
   doc.documentElement.appendChild(host);
 
+  // A page can drop the host after we appended it: a React SPA that recovers
+  // from a hydration error by client-rendering the whole document replaces
+  // <html>, and the host goes with the old one (seen on Plane). Without
+  // re-attaching, every show* below would style a detached node and nothing
+  // would appear. Called before each show, so the next scan brings it back.
+  let destroyed = false;
+  const attach = () => {
+    if (!destroyed && !host.isConnected) doc.documentElement.appendChild(host);
+  };
+
   let iconHandler: (() => void) | null = null;
   icon.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); iconHandler?.(); });
 
@@ -200,13 +232,15 @@ export function createOverlay(doc: Document = document): OverlayController {
   return {
     showIcon(field, onIconClick) {
       if (!isFillableGeometry(field)) { this.hide(); return; }
+      attach();
       const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
-      icon.style.left = `${p.left}px`;
+      icon.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;
       icon.style.top = `${p.top}px`;
       icon.style.display = 'grid';
       iconHandler = onIconClick;
     },
     showMatches(anchor, matches, onPick) {
+      attach();
       renderMatches(list, matches, onPick);
       const rect = anchor.getBoundingClientRect();
       list.style.left = `${rect.left + view.scrollX}px`;
@@ -215,14 +249,16 @@ export function createOverlay(doc: Document = document): OverlayController {
     },
     showGeneratorIcon(field, onClick) {
       if (!isFillableGeometry(field)) { gen.style.display = 'none'; return; }
+      attach();
       const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
-      gen.style.left = `${p.left}px`;
+      gen.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;
       gen.style.top = `${p.top}px`;
       gen.style.display = 'grid';
       genHandler = onClick;
     },
     hideGenerator() { gen.style.display = 'none'; },
     showToast(anchor, text, ms = 4000) {
+      attach();
       if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
       toast.textContent = text; // display-only text node; closed shadow DOM hides it from the page
       const rect = anchor.getBoundingClientRect();
@@ -234,6 +270,7 @@ export function createOverlay(doc: Document = document): OverlayController {
       if (ms > 0) toastTimer = view.setTimeout(() => { toastTimer = null; this.hideToast(); }, ms);
     },
     showNotice(text, ms = 8000) {
+      attach();
       if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
       toast.textContent = text;
       toast.style.position = 'fixed';
@@ -245,6 +282,6 @@ export function createOverlay(doc: Document = document): OverlayController {
     },
     hideToast() { toast.style.display = 'none'; toast.textContent = ''; },
     hide() { icon.style.display = 'none'; list.style.display = 'none'; },
-    destroy() { host.remove(); },
+    destroy() { destroyed = true; host.remove(); },
   };
 }
