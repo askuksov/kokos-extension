@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 (globalThis as any).defineContentScript ??= (cfg: unknown) => cfg;
 
 const { wireSaveCapture } = await import('../entrypoints/content');
+const { createFillMemory } = await import('../lib/fill-memory');
+const { valueToken } = await import('../lib/save-prompt-gate');
 
 beforeEach(() => { document.body.innerHTML = ''; });
 
@@ -68,5 +70,41 @@ describe('wireSaveCapture', () => {
     wireSaveCapture(document, send);
     (document.getElementById('s') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     expect(send).not.toHaveBeenCalled(); // detectLoginForms excludes new-password-only forms
+  });
+
+  it('does not send a password still equal to what Kokos filled from the vault', () => {
+    const f = loginForm();
+    const filled = createFillMemory();
+    filled.remember(valueToken('hunter2'));
+    const send = vi.fn();
+    wireSaveCapture(document, send, filled);
+    f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends when the user edited the password Kokos filled', () => {
+    const f = loginForm();
+    const filled = createFillMemory();
+    filled.remember(valueToken('hunter2'));
+    (f.querySelector('[name=password]') as HTMLInputElement).value = 'hunter3';
+    const send = vi.fn();
+    wireSaveCapture(document, send, filled);
+    f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenCalledWith({ username: 'alice', password: 'hunter3' });
+  });
+
+  it('skips a vault-filled password on the formless SPA click path too', () => {
+    document.body.innerHTML = `
+      <div>
+        <input name="email" type="text" value="alice">
+        <input name="password" type="password" value="hunter2">
+        <button type="button" id="go">Sign in</button>
+      </div>`;
+    const filled = createFillMemory();
+    filled.remember(valueToken('hunter2'));
+    const send = vi.fn();
+    wireSaveCapture(document, send, filled);
+    (document.getElementById('go') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(send).not.toHaveBeenCalled();
   });
 });

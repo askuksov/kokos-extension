@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { fillFromMatch, setNativeValue, type FillDeps } from './fill';
 import type { OverlayMatch } from './overlay';
 import type { NmhResponse } from './nmh-client';
+import { valueToken } from './save-prompt-gate';
 
 const MATCH: OverlayMatch = { id: 'e1', title: 'Aliexpress', username: 'askuksov' };
 
@@ -111,6 +112,22 @@ describe('fillFromMatch', () => {
     expect(d.usernameField!.value).toBe('askuksov');
     // secret-minimization: no get_secret on a username-only step
     expect(d.request).not.toHaveBeenCalled();
+  });
+  it('reports the token of the filled secret, never the plaintext', async () => {
+    const onSecretFilled = vi.fn();
+    const d = deps({ onSecretFilled }, ok);
+    await fillFromMatch(d, MATCH);
+    expect(onSecretFilled).toHaveBeenCalledTimes(1);
+    expect(onSecretFilled).toHaveBeenCalledWith(valueToken('s3cr3t'));
+    expect(onSecretFilled).not.toHaveBeenCalledWith('s3cr3t');
+  });
+  it('reports no token when nothing was filled', async () => {
+    const onSecretFilled = vi.fn();
+    await fillFromMatch(deps({ onSecretFilled, currentGen: () => 2 }, ok), MATCH); // superseded
+    await fillFromMatch(deps({ onSecretFilled }, err), MATCH);
+    await fillFromMatch(deps({ onSecretFilled }, denied), MATCH);
+    await fillFromMatch(deps({ onSecretFilled, passwordField: null }, ok), MATCH); // username-only step
+    expect(onSecretFilled).not.toHaveBeenCalled();
   });
 });
 

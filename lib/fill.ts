@@ -6,6 +6,7 @@
 
 import type { NmhResponse, GetSecretResult } from './nmh-client';
 import type { OverlayMatch } from './overlay';
+import { valueToken } from './save-prompt-gate';
 
 export function setNativeValue(el: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -32,6 +33,10 @@ export interface FillDeps {
   // on the page; nothing here depends on it, so it stays optional and the pure
   // fill path is unchanged when it is absent.
   onAwaitingApproval?: () => void;
+  // Called once after the secret lands in the password field, with its
+  // valueToken (never the plaintext). The content script uses it to skip the
+  // save prompt when the submitted password is still the vault's own value.
+  onSecretFilled?: (token: string) => void;
 }
 
 export async function fillFromMatch(
@@ -64,6 +69,7 @@ export async function fillFromMatch(
     if (deps.usernameField && !deps.isConnected(deps.usernameField)) return 'discarded';
     if (deps.passwordField) setNativeValue(deps.passwordField, secret);
     if (deps.usernameField && match.username) setNativeValue(deps.usernameField, match.username);
+    deps.onSecretFilled?.(valueToken(secret));
     return 'filled';
   } finally {
     secret = ''; // clear the transient secret regardless of path

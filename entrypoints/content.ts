@@ -12,6 +12,7 @@ import { detectPasswordFields, fillGenerated, type PasswordFields } from '../lib
 import type { FillEntryMsg, FillEntryResult, TotpFillMsg, TotpFillResult } from '../lib/entry-picker';
 import { t } from '../lib/strings';
 import { PROBE_KEY, type FrameProbe } from '../lib/frame-target';
+import { createFillMemory, type FillMemory } from '../lib/fill-memory';
 
 export default defineContentScript({
   registration: 'runtime',
@@ -20,12 +21,13 @@ export default defineContentScript({
   runAt: 'document_idle',
   main() {
     if (!sameOriginAsTop(window)) return; // never operate a cross-origin subframe
-    runContentScript();
+    const filled = createFillMemory();
+    runContentScript(filled);
     wireSaveCapture(document, (cred) => {
       try {
         chrome.runtime.sendMessage({ type: 'save-capture', username: cred.username, password: cred.password });
       } catch { /* SW asleep / no receiver: dropped; the user can resubmit */ }
-    });
+    }, filled);
   },
 });
 
@@ -41,7 +43,7 @@ function request(action: string, payload: object): Promise<NmhResponse> {
   });
 }
 
-function runContentScript() {
+function runContentScript(filled: FillMemory) {
   const overlay = createOverlay(document);
   let gen = 0;
   const url = () => location.href;
@@ -85,6 +87,9 @@ function runContentScript() {
             awaited = true;
             if (anchor) overlay.showToast(anchor, t('awaitingApproval'), 0);
           },
+          // Generator fills deliberately skip this: a generated password is new
+          // and must still be offered for saving.
+          onSecretFilled: (token) => filled.remember(token),
         },
         match,
       );
@@ -191,12 +196,20 @@ function runContentScript() {
 // Save capture: read credential values ONCE at the submit gesture and hand
 // them to the background (fire-and-forget, so the message survives a classic
 // form submit's navigation). No keystroke observation; the content script
-// retains nothing. `send` is injected so this is unit-testable without chrome.
-export function wireSaveCapture(doc: Document, send: (cred: Captured) => void): void {
+// retains no submitted value. A password still equal to what Kokos filled from
+// the vault is not sent: offering to save or update it would be noise. An edited
+// password differs from the remembered token and goes through as usual.
+// `send` is injected so this is unit-testable without chrome.
+export function wireSaveCapture(
+  doc: Document,
+  send: (cred: Captured) => void,
+  filled?: Pick<FillMemory, 'isFromVault'>,
+): void {
   const captureFrom = (form: LoginForm | null | undefined) => {
     if (!form) return;
     const cred = snapshotCredentials(form);
-    if (cred) send(cred);
+    if (!cred || filled?.isFromVault(cred.password)) return;
+    send(cred);
   };
   doc.addEventListener('submit', (e) => {
     const t = e.target;
