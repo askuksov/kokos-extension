@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { fillFromMatch, setNativeValue, type FillDeps } from './fill';
 import type { OverlayMatch } from './overlay';
 import type { NmhResponse } from './nmh-client';
-import { valueToken } from './save-prompt-gate';
+import { fillToken } from './fill-memory';
 
 const MATCH: OverlayMatch = { id: 'e1', title: 'Aliexpress', username: 'askuksov' };
 
@@ -118,8 +118,17 @@ describe('fillFromMatch', () => {
     const d = deps({ onSecretFilled }, ok);
     await fillFromMatch(d, MATCH);
     expect(onSecretFilled).toHaveBeenCalledTimes(1);
-    expect(onSecretFilled).toHaveBeenCalledWith(valueToken('s3cr3t'));
+    expect(onSecretFilled).toHaveBeenCalledWith(fillToken('s3cr3t'));
     expect(onSecretFilled).not.toHaveBeenCalledWith('s3cr3t');
+  });
+  it('reports the token before the fill events fire', async () => {
+    // A page may submit synchronously from an input listener; that submit must
+    // already see the token.
+    const seen: string[] = [];
+    const d = deps({ onSecretFilled: () => seen.push('token') }, ok);
+    d.passwordField!.addEventListener('input', () => seen.push('input'));
+    await fillFromMatch(d, MATCH);
+    expect(seen).toEqual(['token', 'input']);
   });
   it('reports no token when nothing was filled', async () => {
     const onSecretFilled = vi.fn();
