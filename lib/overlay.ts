@@ -105,6 +105,8 @@ export function positionFor(rect: { left: number; top: number; width: number; he
   };
 }
 
+const CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [role="link"], [tabindex], [onclick], svg';
+
 // Viewport `left` for an icon at the field's right edge, moved left past any
 // page control drawn over that edge (a show-password eye, a clear button):
 // sitting on top of it would hide it and swallow its clicks. `exclude` is our
@@ -115,11 +117,11 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
   const cy = rect.top + rect.height / 2;
   const iconTop = cy - ICON_SIZE / 2;
   const view = doc.defaultView;
-  // Buttons and glyphs next to the field (a UI kit may nest the input a level
-  // deeper than its buttons), found by geometry so a narrow one between hit-test
-  // points is not missed.
+  // Clickable elements and glyphs next to the field (a UI kit may nest the
+  // input a level deeper than its buttons), found by geometry so a narrow one
+  // between hit-test points is not missed.
   const scope = field.parentElement?.parentElement ?? field.parentElement;
-  const nearby = scope ? Array.from(scope.querySelectorAll('button, [role="button"], svg')) : [];
+  const nearby = scope ? Array.from(scope.querySelectorAll(CONTROL_SELECTOR)) : [];
   const isControl = (c: Element) => c !== exclude && !c.contains(field) && !field.contains(c);
   const visible = (c: Element) => view?.getComputedStyle(c).visibility !== 'hidden';
   // The page control (if any) the hit test finds at x, for clickable elements
