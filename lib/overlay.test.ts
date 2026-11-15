@@ -53,7 +53,8 @@ describe('iconLeftAvoiding', () => {
   }
 
   it('keeps the right-edge spot when the field itself is on top', () => {
-    const { field } = setup(() => []);
+    const { field, eye } = setup(() => []);
+    stubRect(eye, { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 }); // not rendered
     (document as any).elementsFromPoint = vi.fn(() => [field]);
     expect(iconLeftAvoiding(field, document, null)).toBe(186);
   });
@@ -84,9 +85,25 @@ describe('iconLeftAvoiding', () => {
     expect(iconLeftAvoiding(field, document, null)).toBe(200 - 20 - 4);
   });
 
+  it('moves left of a narrow button that falls between hit-test points', () => {
+    // Icon spans 186..206; a button at 188..195 is missed by x = 187, 196 and 205.
+    const { field, eye } = setup(() => []);
+    stubRect(eye, { left: 188, top: 12, width: 7, height: 20, right: 195, bottom: 32 });
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(188 - 20 - 4);
+  });
+
+  it('ignores a nearby button that does not overlap the icon', () => {
+    const { field, eye } = setup(() => []);
+    stubRect(eye, { left: 120, top: 12, width: 20, height: 20, right: 140, bottom: 32 });
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(186);
+  });
+
   it('ignores our own host', () => {
     const host = document.createElement('div');
-    const { field } = setup(() => []);
+    const { field, eye } = setup(() => []);
+    stubRect(eye, { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 }); // not rendered
     (document as any).elementsFromPoint = vi.fn(() => [host, field]);
     expect(iconLeftAvoiding(field, document, host)).toBe(186);
   });

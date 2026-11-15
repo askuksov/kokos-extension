@@ -112,28 +112,41 @@ export function positionFor(rect: { left: number; top: number; width: number; he
 export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element | null): number {
   const rect = field.getBoundingClientRect();
   const original = rect.left + rect.width - ICON_SIZE - 4;
-  if (typeof doc.elementsFromPoint !== 'function') return original;
   const cy = rect.top + rect.height / 2;
-  // The page control (if any) drawn at x; null when the field itself is there.
-  const controlAt = (x: number): Element | null => {
+  const iconTop = cy - ICON_SIZE / 2;
+  const view = doc.defaultView;
+  // Buttons and glyphs next to the field (a UI kit may nest the input a level
+  // deeper than its buttons), found by geometry so a narrow one between hit-test
+  // points is not missed.
+  const scope = field.parentElement?.parentElement ?? field.parentElement;
+  const nearby = scope ? Array.from(scope.querySelectorAll('button, [role="button"], svg')) : [];
+  const isControl = (c: Element) => c !== exclude && !c.contains(field) && !field.contains(c);
+  const visible = (c: Element) => view?.getComputedStyle(c).visibility !== 'hidden';
+  // The page control (if any) the hit test finds at x, for clickable elements
+  // that are neither a button nor an svg.
+  const hitAt = (x: number): Element | null => {
+    if (typeof doc.elementsFromPoint !== 'function') return null;
     const top = doc.elementsFromPoint(x, cy).find((e) => e !== exclude);
     if (!top || top === field || top.contains(field)) return null;
     // The whole button, not just the glyph inside it.
     const control = top.closest('button, [role="button"]') ?? top.closest('svg') ?? top;
-    return control.contains(field) ? null : control;
+    return isControl(control) ? control : null;
   };
   let left = original;
   for (let i = 0; i < 3; i++) {
-    // Both edges and the centre: a control can cover part of the icon only.
-    let blockedAt: number | null = null;
-    for (const x of [left + 1, left + ICON_SIZE / 2, left + ICON_SIZE - 1]) {
-      const control = controlAt(x);
-      if (!control) continue;
-      const l = control.getBoundingClientRect().left;
-      blockedAt = blockedAt === null ? l : Math.min(blockedAt, l);
+    const right = left + ICON_SIZE;
+    const blockers = nearby.filter((c) => {
+      if (!isControl(c)) return false;
+      const r = c.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.left < right && r.right > left
+        && r.top < iconTop + ICON_SIZE && r.bottom > iconTop && visible(c);
+    });
+    for (const x of [left + 1, left + ICON_SIZE / 2, right - 1]) {
+      const hit = hitAt(x);
+      if (hit) blockers.push(hit);
     }
-    if (blockedAt === null) return left;
-    left = blockedAt - ICON_SIZE - 4;
+    if (blockers.length === 0) return left;
+    left = Math.min(...blockers.map((c) => c.getBoundingClientRect().left)) - ICON_SIZE - 4;
     if (left < rect.left) return original; // no free room inside the field
   }
   return left;
