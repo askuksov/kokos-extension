@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { classifyField, detectLoginForms, watch, sameOriginAsTop } from './detection';
+import { classifyField, detectLoginForms, watch, watchLayout, sameOriginAsTop } from './detection';
 
 function input(attrs: Record<string, string>): HTMLInputElement {
   const el = document.createElement('input');
@@ -86,6 +86,43 @@ describe('watch', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(cb).toHaveBeenCalled();
     stop();
+  });
+});
+
+describe('watchLayout', () => {
+  function fakeWindow() {
+    const target = new EventTarget();
+    const frames: Array<() => void> = [];
+    const win = {
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      requestAnimationFrame: (cb: FrameRequestCallback) => { frames.push(() => cb(0)); return frames.length; },
+    };
+    return { win, frames, resize: () => target.dispatchEvent(new Event('resize')) };
+  }
+
+  it('re-places once per frame however many resize events arrive', () => {
+    const { win, frames, resize } = fakeWindow();
+    const cb = vi.fn();
+    watchLayout(win as any, cb);
+    resize(); resize(); resize();
+    expect(cb).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(1);
+    frames.shift()!();
+    expect(cb).toHaveBeenCalledTimes(1);
+    resize();
+    frames.shift()!();
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops listening after the returned stop()', () => {
+    const { win, frames, resize } = fakeWindow();
+    const cb = vi.fn();
+    const stop = watchLayout(win as any, cb);
+    stop();
+    resize();
+    expect(frames).toHaveLength(0);
+    expect(cb).not.toHaveBeenCalled();
   });
 });
 
