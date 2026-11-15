@@ -334,7 +334,9 @@ async function render() {
 // the change itself through storage.onChanged, no reload.
 async function renderIconToggle(url: string, enabled: boolean): Promise<void> {
   const btn = document.getElementById('icon-toggle') as HTMLButtonElement;
-  const prefs = await loadIconPrefs();
+  // An optional control: a failed read hides it and lets the rest of the popup render.
+  let prefs: Awaited<ReturnType<typeof loadIconPrefs>>;
+  try { prefs = await loadIconPrefs(); } catch { btn.hidden = true; return; }
   if (!enabled || !prefs.showIcon) { btn.hidden = true; return; }
   const hidden = prefs.hiddenSites.includes(new URL(url).origin);
   btn.hidden = false;
@@ -342,7 +344,12 @@ async function renderIconToggle(url: string, enabled: boolean): Promise<void> {
   btn.textContent = hidden ? t('showIconHere') : t('hideIconHere');
   btn.onclick = async () => {
     btn.disabled = true;
-    await (hidden ? showIconOn(url) : hideIconOn(url));
+    try {
+      await (hidden ? showIconOn(url) : hideIconOn(url));
+    } catch {
+      btn.disabled = false; // nothing changed: same label, ready for a retry
+      return;
+    }
     await renderIconToggle(url, enabled);
   };
 }
