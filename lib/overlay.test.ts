@@ -117,6 +117,18 @@ describe('iconLeftAvoiding', () => {
     expect(iconLeftAvoiding(field, document, null)).toBe(188 - 20 - 4);
   });
 
+  it('keeps moving past a row of controls until the spot is clear', () => {
+    const { field, wrap, eye } = setup(() => []);
+    stubRect(eye, { left: 190, top: 12, width: 16, height: 20, right: 206, bottom: 32 });
+    for (const l of [170, 150, 130]) {
+      const b = document.createElement('button');
+      wrap.appendChild(b);
+      stubRect(b, { left: l, top: 12, width: 16, height: 20, right: l + 16, bottom: 32 });
+    }
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(130 - 20 - 4); // 106..126, clear of all four
+  });
+
   it('ignores a nearby button that does not overlap the icon', () => {
     const { field, eye } = setup(() => []);
     stubRect(eye, { left: 120, top: 12, width: 20, height: 20, right: 140, bottom: 32 });

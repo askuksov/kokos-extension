@@ -140,7 +140,10 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
     return isControl(control) ? control : null;
   };
   let left = original;
-  for (let i = 0; i < 3; i++) {
+  // Each step moves at least 4px left (a blocker starts before the icon's
+  // right edge), so this ends at a clear spot or the field's left edge; the
+  // cap only guards against a page that keeps reporting moving boxes.
+  for (let i = 0; i < 50; i++) {
     const right = left + ICON_SIZE;
     const blockers = nearby.filter((c) => {
       if (!isControl(c)) return false;
@@ -156,7 +159,7 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
     left = Math.min(...blockers.map((c) => c.getBoundingClientRect().left)) - ICON_SIZE - 4;
     if (left < rect.left) return original; // no free room inside the field
   }
-  return left;
+  return original;
 }
 
 export function renderMatches(container: HTMLElement | ShadowRoot, matches: OverlayMatch[], onPick: (m: OverlayMatch) => void): void {
