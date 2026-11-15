@@ -64,16 +64,18 @@ export function watch(target: Node, onChange: () => void): () => void {
 // must be re-placed. Coalesced to one call per animation frame.
 export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventListener'> & Partial<Pick<Window, 'requestAnimationFrame' | 'setTimeout'>>, onChange: () => void): () => void {
   let pending = false;
+  let stopped = false;
   const schedule = win.requestAnimationFrame
     ? (cb: () => void) => { win.requestAnimationFrame!(() => cb()); }
     : (cb: () => void) => { (win.setTimeout ?? setTimeout)(cb, 16); };
   const onResize = () => {
     if (pending) return;
     pending = true;
-    schedule(() => { pending = false; onChange(); });
+    // A frame queued before stop() must not call back after it.
+    schedule(() => { pending = false; if (!stopped) onChange(); });
   };
   win.addEventListener('resize', onResize, { passive: true });
-  return () => win.removeEventListener('resize', onResize);
+  return () => { stopped = true; win.removeEventListener('resize', onResize); };
 }
 
 export function sameOriginAsTop(win: Window): boolean {

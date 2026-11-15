@@ -115,6 +115,16 @@ describe('watchLayout', () => {
     expect(cb).toHaveBeenCalledTimes(2);
   });
 
+  it('drops a frame that was queued before stop()', () => {
+    const { win, frames, resize } = fakeWindow();
+    const cb = vi.fn();
+    const stop = watchLayout(win as any, cb);
+    resize();
+    stop();
+    frames.shift()!();
+    expect(cb).not.toHaveBeenCalled();
+  });
+
   it('stops listening after the returned stop()', () => {
     const { win, frames, resize } = fakeWindow();
     const cb = vi.fn();
