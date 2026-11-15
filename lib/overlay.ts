@@ -86,7 +86,10 @@ const OVERLAY_CSS = `
   box-shadow: var(--shadow); overflow-wrap: anywhere; }
 `;
 
-export function isFillableGeometry(el: Element): boolean {
+// `exclude` is our own overlay host: once the icon has moved left of a field
+// button it can sit over the field's centre, and counting it as an obstruction
+// would hide the icon on every other scan.
+export function isFillableGeometry(el: Element, exclude: Element | null = null): boolean {
   const rect = el.getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) return false;
   const vw = window.innerWidth || document.documentElement.clientWidth;
@@ -94,7 +97,9 @@ export function isFillableGeometry(el: Element): boolean {
   if (rect.bottom < 0 || rect.right < 0 || rect.top > vh || rect.left > vw) return false;
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
-  const hit = document.elementFromPoint(cx, cy);
+  const hit = exclude && typeof document.elementsFromPoint === 'function'
+    ? document.elementsFromPoint(cx, cy).find((e) => e !== exclude)
+    : document.elementFromPoint(cx, cy);
   return !!hit && (hit === el || el.contains(hit));
 }
 
@@ -258,7 +263,7 @@ export function createOverlay(doc: Document = document): OverlayController {
 
   return {
     showIcon(field, onIconClick) {
-      if (!isFillableGeometry(field)) { this.hide(); return; }
+      if (!isFillableGeometry(field, host)) { this.hide(); return; }
       attach();
       const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
       icon.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;
@@ -275,7 +280,7 @@ export function createOverlay(doc: Document = document): OverlayController {
       list.style.display = 'block';
     },
     showGeneratorIcon(field, onClick) {
-      if (!isFillableGeometry(field)) { gen.style.display = 'none'; return; }
+      if (!isFillableGeometry(field, host)) { gen.style.display = 'none'; return; }
       attach();
       const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
       gen.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;

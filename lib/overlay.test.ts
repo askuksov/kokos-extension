@@ -22,6 +22,19 @@ describe('isFillableGeometry', () => {
     (document as any).elementFromPoint = vi.fn().mockReturnValue(el);
     expect(isFillableGeometry(el)).toBe(true);
   });
+  it('does not count our own overlay host over the centre as an obstruction', () => {
+    const el = document.createElement('input'); stubRect(el, {});
+    const host = document.createElement('div');
+    (document as any).elementsFromPoint = vi.fn().mockReturnValue([host, el]);
+    expect(isFillableGeometry(el, host)).toBe(true);
+  });
+  it('still rejects a page element over the centre when the host is excluded', () => {
+    const el = document.createElement('input'); stubRect(el, {});
+    const host = document.createElement('div');
+    const other = document.createElement('div');
+    (document as any).elementsFromPoint = vi.fn().mockReturnValue([host, other, el]);
+    expect(isFillableGeometry(el, host)).toBe(false);
+  });
   it('rejects a field outside the viewport', () => {
     const el = document.createElement('input'); stubRect(el, { top: -500, bottom: -470, left: 10, right: 110, width: 100, height: 30 });
     (document as any).elementFromPoint = vi.fn().mockReturnValue(el);
@@ -173,7 +186,7 @@ describe('createOverlay', () => {
     const field = document.createElement('input');
     field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
     document.body.appendChild(field);
-    (document as any).elementFromPoint = () => field;
+    (document as any).elementFromPoint = () => field; (document as any).elementsFromPoint = () => [field];
     return field;
   }
 
@@ -217,7 +230,7 @@ describe('generator icon (independent of the login icon)', () => {
     const field = document.createElement('input');
     field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
     document.body.appendChild(field);
-    (document as any).elementFromPoint = () => field; // pass isFillableGeometry
+    (document as any).elementFromPoint = () => field; (document as any).elementsFromPoint = () => [field]; // pass isFillableGeometry
     const before = document.documentElement.querySelectorAll('div').length;
     const o = createOverlay(document);
     expect(typeof o.showGeneratorIcon).toBe('function');
