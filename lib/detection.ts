@@ -59,6 +59,23 @@ export function watch(target: Node, onChange: () => void): () => void {
   return () => obs.disconnect();
 }
 
+// Layout changes that touch no DOM node (a window resize re-flowing a centred
+// form) still move the fields; the icon is placed in page coordinates, so it
+// must be re-placed. Coalesced to one call per animation frame.
+export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventListener'> & Partial<Pick<Window, 'requestAnimationFrame' | 'setTimeout'>>, onChange: () => void): () => void {
+  let pending = false;
+  const schedule = win.requestAnimationFrame
+    ? (cb: () => void) => { win.requestAnimationFrame!(() => cb()); }
+    : (cb: () => void) => { (win.setTimeout ?? setTimeout)(cb, 16); };
+  const onResize = () => {
+    if (pending) return;
+    pending = true;
+    schedule(() => { pending = false; onChange(); });
+  };
+  win.addEventListener('resize', onResize, { passive: true });
+  return () => win.removeEventListener('resize', onResize);
+}
+
 export function sameOriginAsTop(win: Window): boolean {
   if (win === win.top) return true;
   try {
