@@ -93,6 +93,17 @@ describe('iconLeftAvoiding', () => {
     expect(iconLeftAvoiding(field, document, null)).toBe(188 - 20 - 4);
   });
 
+  it('moves left of a narrow link that falls between hit-test points', () => {
+    const { field, wrap, eye } = setup(() => []);
+    stubRect(eye, { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 }); // not rendered
+    const link = document.createElement('a');
+    link.href = '#';
+    wrap.appendChild(link);
+    stubRect(link, { left: 188, top: 12, width: 7, height: 20, right: 195, bottom: 32 });
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(188 - 20 - 4);
+  });
+
   it('ignores a nearby button that does not overlap the icon', () => {
     const { field, eye } = setup(() => []);
     stubRect(eye, { left: 120, top: 12, width: 20, height: 20, right: 140, bottom: 32 });
