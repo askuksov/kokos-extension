@@ -8,6 +8,12 @@ describe('monogram', () => {
   it('keeps an emoji first character whole', () => {
     expect(monogram('🏦 Bank').letter).toBe('🏦');
   });
+  it('keeps a skin-tone emoji whole', () => {
+    expect(monogram('👩🏽 Mail').letter).toBe('👩🏽');
+  });
+  it('keeps a flag emoji whole', () => {
+    expect(monogram('🇺🇦 Bank').letter).toBe('🇺🇦');
+  });
   it('falls back to ? for an empty or blank title', () => {
     expect(monogram('').letter).toBe('?');
     expect(monogram('   ').letter).toBe('?');
