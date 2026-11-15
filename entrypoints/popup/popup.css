@@ -115,7 +115,12 @@ body { width: 340px; background: var(--bg-app); }
 #save > .hint { margin: 0; }
 
 .foot { padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--bg-panel); }
+.foot { display: flex; flex-direction: column; gap: 6px; }
+.foot[hidden] { display: none; }
 .foot button { width: 100%; }
+/* The theme's inline-flex would otherwise override the hidden attribute. */
+.foot button[hidden] { display: none; }
+#icon-toggle { box-shadow: none; color: var(--text-2); font-size: 12px; padding: 4px 10px; }
 
 /* Data-sharing consent (Firefox, installed by policy): replaces the popup body. */
 #consent:empty { display: none; }

@@ -18,3 +18,19 @@ export function buildSiteRow(origin: string, actionLabel: string, onAction: (ori
   row.append(label, btn);
   return row;
 }
+
+/** A labelled checkbox row. The label is passed in (localized by the caller);
+ * onChange gets the new state, and a failed save (onChange rejects) puts the
+ * box back so it never shows a setting that was not stored. */
+export function buildToggleRow(label: string, checked: boolean, onChange: (on: boolean) => Promise<void>): HTMLElement {
+  const row = document.createElement('label'); row.className = 'site-row toggle-row';
+  const text = document.createElement('span'); text.textContent = label;
+  const box = document.createElement('input'); box.type = 'checkbox'; box.checked = checked;
+  box.onchange = async () => {
+    const on = box.checked;
+    box.disabled = true;
+    try { await onChange(on); } catch { box.checked = !on; } finally { box.disabled = false; }
+  };
+  row.append(text, box);
+  return row;
+}
