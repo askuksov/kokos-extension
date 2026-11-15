@@ -13,6 +13,7 @@ import type { FillEntryMsg, FillEntryResult, TotpFillMsg, TotpFillResult } from 
 import { t } from '../lib/strings';
 import { PROBE_KEY, type FrameProbe } from '../lib/frame-target';
 import { createFillMemory, type FillMemory } from '../lib/fill-memory';
+import { loadIconPrefs, iconAllowed, isIconPrefsChange, type IconPrefs } from '../lib/icon-prefs';
 
 export default defineContentScript({
   registration: 'runtime',
@@ -47,8 +48,6 @@ function runContentScript(filled: FillMemory) {
   const overlay = createOverlay(document);
   let gen = 0;
   const url = () => location.href;
-
-  const target = (f: LoginForm): HTMLInputElement | null => f.password ?? f.username;
 
   async function offer(field: HTMLInputElement, form: LoginForm) {
     gen += 1; // any fresh offer supersedes an in-flight fill
@@ -105,20 +104,24 @@ function runContentScript(filled: FillMemory) {
     await fillEntry(match, form);
   }
 
+  // Icon preferences (global switch + per-site hide). Null until the first
+  // read lands, so a page where the user hid the icon never flashes it.
+  let prefs: IconPrefs | null = null;
+  let prefsSeq = 0;
+  const reloadPrefs = () => {
+    const seq = ++prefsSeq;
+    const apply = (p: IconPrefs) => { if (seq === prefsSeq) { prefs = p; scan(); } };
+    loadIconPrefs().then(apply, () => apply({ showIcon: true, hiddenSites: [] }));
+  };
+
   function scan() {
-    // Login offer (unchanged behavior, no early return so the generator scan runs too).
-    const forms = detectLoginForms(document);
-    if (forms.length === 0) {
-      overlay.hide();
-    } else {
-      const form = forms[0]!;
-      const field = target(form);
-      if (field) overlay.showIcon(field, () => void offer(field, form));
-    }
-    // Generator affordance (independent — both icons may show on a change-password page).
-    const pwFields = detectPasswordFields(document);
-    if (pwFields.length === 0) overlay.hideGenerator();
-    else overlay.showGeneratorIcon(pwFields[0]!.primary, () => void onGenerate(pwFields[0]!));
+    scanFieldIcons({
+      doc: document,
+      overlay,
+      iconsOn: prefs !== null && iconAllowed(prefs, url()),
+      onOffer: (field, form) => void offer(field, form),
+      onGenerate: (fields) => void onGenerate(fields),
+    });
   }
 
   async function onGenerate(fields: PasswordFields) {
@@ -134,7 +137,11 @@ function runContentScript(filled: FillMemory) {
     if (outcome.status === 'filled') overlay.showToast(fields.primary, t('genFilled', outcome.value));
   }
 
-  scan();
+  reloadPrefs(); // first scan runs once the preferences are read
+  // Applied without a reload: the options page or the popup changed a setting.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (isIconPrefsChange(changes, area)) reloadPrefs();
+  });
   // A DOM mutation re-scans (reposition icon / detect new forms) but must NOT
   // invalidate an in-flight, user-confirmed fill — supersession is tracked by
   // offer/onPick bumping `gen`, and a replaced field is caught by isConnected
@@ -195,6 +202,38 @@ function runContentScript(filled: FillMemory) {
     doc: document,
     addListener: (cb) => chrome.runtime.onMessage.addListener(cb as any),
   });
+}
+
+// One pass over the page for the in-field icons. With the icons turned off
+// (globally or for this site) nothing is drawn, and popup Fill and the shortcut
+// still work: they detect the form themselves.
+export interface FieldIconScan {
+  doc: Document;
+  overlay: Pick<OverlayController, 'showIcon' | 'hide' | 'showGeneratorIcon' | 'hideGenerator'>;
+  iconsOn: boolean;
+  onOffer: (field: HTMLInputElement, form: LoginForm) => void;
+  onGenerate: (fields: PasswordFields) => void;
+}
+
+export function scanFieldIcons(s: FieldIconScan): void {
+  if (!s.iconsOn) {
+    s.overlay.hide();
+    s.overlay.hideGenerator();
+    return;
+  }
+  // Login offer (no early return so the generator scan runs too).
+  const forms = detectLoginForms(s.doc);
+  if (forms.length === 0) {
+    s.overlay.hide();
+  } else {
+    const form = forms[0]!;
+    const field = form.password ?? form.username;
+    if (field) s.overlay.showIcon(field, () => s.onOffer(field, form));
+  }
+  // Generator affordance (independent — both icons may show on a change-password page).
+  const pwFields = detectPasswordFields(s.doc);
+  if (pwFields.length === 0) s.overlay.hideGenerator();
+  else s.overlay.showGeneratorIcon(pwFields[0]!.primary, () => s.onGenerate(pwFields[0]!));
 }
 
 // Save capture: read credential values ONCE at the submit gesture and hand

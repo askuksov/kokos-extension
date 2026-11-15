@@ -1,6 +1,7 @@
 import { listEnabledSites, disableSite } from '../../lib/site-access';
 import { listIgnoredSaveSites, removeSaveIgnore } from '../../lib/save-ignore';
-import { buildSiteRow } from '../../lib/options-view';
+import { buildSiteRow, buildToggleRow } from '../../lib/options-view';
+import { loadIconPrefs, setShowIcon, listIconHiddenSites, showIconOn, isIconPrefsChange } from '../../lib/icon-prefs';
 import { t } from '../../lib/strings';
 import { LOCAL_CONSENT_KEY, MANAGED_CONSENT_KEY, type ConsentState } from '../../lib/data-consent';
 
@@ -38,8 +39,10 @@ async function renderList(
   act: (origin: string) => Promise<void>,
 ): Promise<void> {
   const box = document.getElementById(boxId)!;
-  box.textContent = '';
   const sites = await load();
+  // Cleared after the read, not before: two overlapping renders (an action's own
+  // redraw and the storage.onChanged one) would otherwise both append their rows.
+  box.textContent = '';
   if (sites.length === 0) {
     const p = document.createElement('div'); p.className = 'empty'; p.textContent = t('optNoSites');
     box.appendChild(p);
@@ -53,11 +56,23 @@ async function renderList(
   }
 }
 
+// In-field icon: global switch + the sites where the popup hid it.
+async function renderIcon(): Promise<void> {
+  const prefs = await loadIconPrefs();
+  const sw = document.getElementById('icon-switch')!;
+  sw.textContent = '';
+  sw.appendChild(buildToggleRow(t('optIconToggle'), prefs.showIcon, setShowIcon));
+  await renderList('icon-hidden-list', listIconHiddenSites, t('optShowIcon'), showIconOn);
+}
+
 function main(): void {
   const sub = document.getElementById('sub');
   if (sub) sub.textContent = t('optSubtitle');
   document.getElementById('fill-h')!.textContent = t('optFillHeading');
   document.getElementById('save-h')!.textContent = t('optSaveOffHeading');
+  document.getElementById('icon-h')!.textContent = t('optIconHeading');
+  document.getElementById('icon-note')!.textContent = t('optIconNote');
+  document.getElementById('icon-hidden-h')!.textContent = t('optIconHiddenHeading');
   void renderConsent();
   // Consent can change while this page is open (Agree in the popup, a new
   // policy): redraw on the storage change and whenever the page is shown again.
@@ -65,8 +80,11 @@ function main(): void {
     if ((area === 'local' && LOCAL_CONSENT_KEY in changes) || (area === 'managed' && MANAGED_CONSENT_KEY in changes)) {
       void renderConsent();
     }
+    // The popup hid or showed the icon for a site while this page is open.
+    if (isIconPrefsChange(changes, area)) void renderIcon();
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) void renderConsent(); });
+  void renderIcon();
   void renderList('fill-list', listEnabledSites, t('optDisable'), disableSite);
   void renderList('save-list', listIgnoredSaveSites, t('optReEnable'), removeSaveIgnore);
 }

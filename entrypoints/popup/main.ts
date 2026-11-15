@@ -6,6 +6,7 @@ import { t } from '../../lib/strings';
 import { resolveFillFrame } from '../../lib/frame-target';
 import { monogram } from '../../lib/monogram';
 import type { ConsentState } from '../../lib/data-consent';
+import { loadIconPrefs, hideIconOn, showIconOn } from '../../lib/icon-prefs';
 
 const PRIVACY_URL = 'https://kokos.kuksov.dev/en/privacy';
 
@@ -295,6 +296,7 @@ async function render() {
   }
   if (!tab?.url || !/^https?:/.test(tab.url)) {
     siteEl.textContent = t('noFillableSite'); toggle.style.display = 'none'; listEl.textContent = '';
+    (document.getElementById('icon-toggle') as HTMLButtonElement).hidden = true;
     return;
   }
   const url = tab.url;
@@ -323,7 +325,26 @@ async function render() {
     await render();
   };
 
+  await renderIconToggle(url, enabled);
   await renderSave(tab);
+}
+
+// "Hide the icon on this site": only on an enabled site and while the icon is on
+// globally (with it off everywhere there is nothing to hide). The page applies
+// the change itself through storage.onChanged, no reload.
+async function renderIconToggle(url: string, enabled: boolean): Promise<void> {
+  const btn = document.getElementById('icon-toggle') as HTMLButtonElement;
+  const prefs = await loadIconPrefs();
+  if (!enabled || !prefs.showIcon) { btn.hidden = true; return; }
+  const hidden = prefs.hiddenSites.includes(new URL(url).origin);
+  btn.hidden = false;
+  btn.disabled = false;
+  btn.textContent = hidden ? t('showIconHere') : t('hideIconHere');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    await (hidden ? showIconOn(url) : hideIconOn(url));
+    await renderIconToggle(url, enabled);
+  };
 }
 
 void render();
