@@ -20,13 +20,20 @@ interface OriginState {
   port: NativePort;
   pending: Map<string, (r: NmhResponse) => void>;
   keepaliveTimer: ReturnType<typeof setInterval> | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const DEFAULT_KEEPALIVE_MS = 20_000;
+// How long a drained port lingers before it is closed. Every open port is a
+// live host process and keeps the MV3 service worker alive, so an origin that
+// was only probed once (the badge asks on every page) must not keep its port.
+const DEFAULT_IDLE_MS = 30_000;
 
 /** Owns one native-messaging connection per site origin. Concurrent tabs on
  * different sites get different ports, so the app's per-connection domain
- * anchor (set by the last get_logins on a port) never crosses origins. */
+ * anchor (set by the last get_logins on a port) never crosses origins.
+ * A port with nothing in flight is closed after idleMs; the next request on
+ * that origin reconnects. */
 export class PortManager {
   private origins = new Map<string, OriginState>();
 
@@ -34,7 +41,11 @@ export class PortManager {
     private connect: ConnectNative,
     // allow: a gate asked before every request. A refused (or throwing) gate
     // resolves a consent_required envelope and nothing reaches the app.
-    private opts: { keepaliveMs?: number; allow?: (action: string) => boolean | Promise<boolean> } = {},
+    private opts: {
+      keepaliveMs?: number;
+      idleMs?: number;
+      allow?: (action: string) => boolean | Promise<boolean>;
+    } = {},
   ) {}
 
   get openOrigins(): string[] {
@@ -66,6 +77,7 @@ export class PortManager {
         return;
       }
       state.pending.set(req.id, resolve);
+      this.stopIdle(state);
       this.startKeepalive(origin, state);
       try {
         state.port.postMessage(req);
@@ -82,6 +94,7 @@ export class PortManager {
     const state = this.origins.get(origin);
     if (!state) return;
     this.stopKeepalive(state);
+    this.stopIdle(state);
     try { state.port.disconnect(); } catch { /* already gone */ }
     // Fail closed any stragglers.
     for (const [id, resolve] of state.pending) {
@@ -95,7 +108,7 @@ export class PortManager {
     const existing = this.origins.get(origin);
     if (existing) return existing;
     const port = this.connect(NATIVE_HOST);
-    const state: OriginState = { port, pending: new Map(), keepaliveTimer: null };
+    const state: OriginState = { port, pending: new Map(), keepaliveTimer: null, idleTimer: null };
     port.onMessage.addListener((resp) => this.onMessage(origin, resp));
     port.onDisconnect.addListener(() => this.onDisconnectFor(origin, state));
     this.origins.set(origin, state);
@@ -111,12 +124,16 @@ export class PortManager {
     if (!resolve) return; // unknown id: nothing waits on it
     state.pending.delete(resp.id);
     resolve(resp as NmhResponse);
-    if (state.pending.size === 0) this.stopKeepalive(state);
+    if (state.pending.size === 0) {
+      this.stopKeepalive(state);
+      this.startIdle(origin, state);
+    }
   }
 
   private onDisconnectFor(origin: string, state: OriginState): void {
     if (this.origins.get(origin) !== state) return; // superseded port: ignore its late disconnect
     this.stopKeepalive(state);
+    this.stopIdle(state);
     for (const [id, resolve] of state.pending) {
       resolve(errEnvelope(id, 'app_not_running', 'native host disconnected'));
     }
@@ -140,6 +157,23 @@ export class PortManager {
         this.onDisconnectFor(origin, state);
       }
     }, ms);
+  }
+
+  private startIdle(origin: string, state: OriginState): void {
+    this.stopIdle(state);
+    state.idleTimer = setTimeout(() => {
+      state.idleTimer = null;
+      // Superseded or busy again: not ours to close.
+      if (this.origins.get(origin) !== state || state.pending.size > 0) return;
+      this.closeOrigin(origin);
+    }, this.opts.idleMs ?? DEFAULT_IDLE_MS);
+  }
+
+  private stopIdle(state: OriginState): void {
+    if (state.idleTimer !== null) {
+      clearTimeout(state.idleTimer);
+      state.idleTimer = null;
+    }
   }
 
   private stopKeepalive(state: OriginState): void {

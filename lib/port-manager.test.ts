@@ -113,13 +113,70 @@ describe('PortManager', () => {
 
   it('tears down the keepalive interval once the outstanding request drains', async () => {
     const f = makeFakePort();
-    const pm = new PortManager(() => f.port, { keepaliveMs: 20_000 });
+    const pm = new PortManager(() => f.port, { keepaliveMs: 20_000, idleMs: 30_000 });
     const p = pm.request('https://a.com', 'get_secret', { entry_id: 'x' });
     expect(vi.getTimerCount()).toBe(1); // keepalive interval armed
     const req = f.lastRealRequest();
     f.reply({ id: req.id, ok: true, payload: {} });
     await p;
-    expect(vi.getTimerCount()).toBe(0); // interval actually cleared, not just re-guarded
+    // Interval actually cleared, not just re-guarded; the one timer left is the idle close.
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(30_000);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('closes a drained port after idleMs so its host process exits', async () => {
+    const f = makeFakePort();
+    const pm = new PortManager(() => f.port, { idleMs: 30_000 });
+    const p = pm.request('https://a.com', 'get_status', {});
+    f.reply({ id: f.lastRealRequest().id, ok: true, payload: {} });
+    await p;
+    vi.advanceTimersByTime(29_999);
+    expect(pm.openOrigins).toContain('https://a.com');
+    expect(f.port.disconnect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(pm.openOrigins).not.toContain('https://a.com');
+    expect(f.port.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('a request inside the idle window reuses the port and restarts the countdown', async () => {
+    let connects = 0;
+    const f = makeFakePort();
+    const pm = new PortManager(() => { connects++; return f.port; }, { idleMs: 30_000 });
+    const p1 = pm.request('https://a.com', 'get_status', {});
+    f.reply({ id: f.lastRealRequest().id, ok: true, payload: {} });
+    await p1;
+    vi.advanceTimersByTime(20_000);
+    const p2 = pm.request('https://a.com', 'get_status', {});
+    f.reply({ id: f.lastRealRequest().id, ok: true, payload: {} });
+    await p2;
+    vi.advanceTimersByTime(20_000); // 40 s after the first answer, 20 s after the second
+    expect(connects).toBe(1);
+    expect(f.port.disconnect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(f.port.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('never idle-closes a port while a request is still in flight', () => {
+    const f = makeFakePort();
+    const pm = new PortManager(() => f.port, { idleMs: 30_000, keepaliveMs: 20_000 });
+    pm.request('https://a.com', 'get_secret', { entry_id: 'x' }); // e.g. waiting on the app's confirm prompt
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(pm.openOrigins).toContain('https://a.com');
+    expect(f.port.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('reconnects on the next request after an idle close', async () => {
+    const ports = [makeFakePort(), makeFakePort()];
+    let n = 0;
+    const pm = new PortManager(() => ports[n++]!.port, { idleMs: 30_000 });
+    const p = pm.request('https://a.com', 'get_status', {});
+    ports[0]!.reply({ id: ports[0]!.lastRealRequest().id, ok: true, payload: {} });
+    await p;
+    vi.advanceTimersByTime(30_000);
+    pm.request('https://a.com', 'get_status', {});
+    expect(n).toBe(2);
+    expect(pm.openOrigins).toContain('https://a.com');
   });
 
   it('fails closed when connect() throws synchronously, without retaining the origin', async () => {
