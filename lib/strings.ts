@@ -8,6 +8,10 @@ export const STRINGS = {
   // popup — status / chrome
   noFillableSite: 'No fillable site in this tab.',
   unlockToFill: 'Unlock Kokos to fill.',
+  unlockKokos: 'Unlock Kokos',
+  unlockInKokos: 'Unlock in the Kokos window…',
+  unlockCancelled: 'Unlock cancelled.',
+  couldNotUnlock: 'Could not unlock Kokos.',
   openKokos: 'Open Kokos to continue.',
   enableHere: 'Enable Kokos here',
   disableHere: 'Disable Kokos here',
@@ -18,6 +22,8 @@ export const STRINGS = {
   stateOffline: 'Not running',
   // popup — save flow
   unlockThenReopenSave: 'Unlock Kokos, then reopen to save this login.',
+  lockedSavePrompt: 'Kokos is locked. Unlock it to save this login.',
+  unlockAndSave: 'Unlock and save',
   updatePrompt: 'Update password in Kokos?',
   savePrompt: 'Save login to Kokos?',
   update: 'Update',

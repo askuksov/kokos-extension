@@ -44,6 +44,24 @@ function request(action: string, payload: object): Promise<NmhResponse> {
   });
 }
 
+// Asks the background to raise the app's unlock dialog for this frame's site
+// (the background reads the site from the browser-set sender, not from here).
+function requestUnlock(): Promise<NmhResponse> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'request-unlock' }, (resp: NmhResponse) => {
+        if (chrome.runtime.lastError || !resp) {
+          resolve({ id: 'x', ok: false, error: { code: 'app_not_running', message: 'background unavailable' } });
+        } else {
+          resolve(resp);
+        }
+      });
+    } catch {
+      resolve({ id: 'x', ok: false, error: { code: 'app_not_running', message: 'background unavailable' } });
+    }
+  });
+}
+
 function runContentScript(filled: FillMemory) {
   const overlay = createOverlay(document);
   let gen = 0;
@@ -51,7 +69,17 @@ function runContentScript(filled: FillMemory) {
 
   async function offer(field: HTMLInputElement, form: LoginForm) {
     gen += 1; // any fresh offer supersedes an in-flight fill
-    const resp = await request('get_logins', { url: url() });
+    const snapshot = gen;
+    let resp = await request('get_logins', { url: url() });
+    // Locked: this click on the key icon is the user action that may raise the
+    // app's unlock dialog. After an unlock, look up once more and show the list
+    // unless a newer offer or fill took over meanwhile.
+    if (!resp.ok && resp.error?.code === 'locked') {
+      const unlocked = await requestUnlock();
+      if (!unlocked.ok || snapshot !== gen || !field.isConnected) return;
+      resp = await request('get_logins', { url: url() });
+      if (snapshot !== gen || !field.isConnected) return;
+    }
     if (!resp.ok || !resp.payload) return; // fail closed (locked/app_not_running/etc.)
     const items = (resp.payload as GetLoginsResult).items ?? [];
     if (items.length === 0) return; // no match: silent, no overlay

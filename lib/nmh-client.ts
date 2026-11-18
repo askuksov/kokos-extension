@@ -52,6 +52,7 @@ export interface GetTotpPayload { entry_id: string; url?: string; }
 export interface SaveLoginPayload { url: string; username: string; password: string; title?: string; }
 export interface UpdateLoginPayload { entry_id: string; password: string; url?: string; }
 export interface GeneratePasswordPayload { length?: number; }
+export interface RequestUnlockPayload { url: string; keep_open?: boolean; }
 
 // Response payload shapes we rely on.
 export interface LoginItem { id: string; title?: string; username?: string | null; hasTotp?: boolean; }

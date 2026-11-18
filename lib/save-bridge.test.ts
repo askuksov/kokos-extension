@@ -295,3 +295,49 @@ describe('save-capture — out-of-order completion', () => {
     expect(deps.pending.get(7)?.password).toBe('B');
   });
 });
+
+describe('unlock-and-save', () => {
+  const held = (over: Partial<Pending> = {}): Pending => ({ token: 'tok', username: 'alice', password: 'pw', url: 'https://a.com/login', origin: 'https://a.com', ts: 1000, ...over });
+
+  it('is popup-only', async () => {
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, csSender, makeDeps());
+    expect(res).toEqual({ ok: false, code: 'denied' });
+  });
+
+  it('unlocks with the pending url, then commits the pending', async () => {
+    const unlock = vi.fn(async () => ok({ unlocked: true }));
+    const request = vi.fn(async (_o: string, action: string) => (action === 'get_logins' ? ok({ items: [] }) : ok({ entry_id: 'e' })));
+    const deps = makeDeps({ unlock, request });
+    deps.pending.set(7, held());
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, deps) as NmhResponse;
+    expect(unlock).toHaveBeenCalledWith('https://a.com/login');
+    expect(res.ok).toBe(true);
+    expect(request).toHaveBeenCalledWith('https://a.com', 'save_login', expect.objectContaining({ username: 'alice', password: 'pw' }));
+    expect(deps.pending.has(7)).toBe(false);
+  });
+
+  it('keeps the pending and writes nothing when the unlock is cancelled', async () => {
+    const unlock = vi.fn(async () => fail('denied'));
+    const deps = makeDeps({ unlock });
+    deps.pending.set(7, held());
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, deps) as NmhResponse;
+    expect(res.error?.code).toBe('denied');
+    expect(deps.request).not.toHaveBeenCalled();
+    expect(deps.pending.has(7)).toBe(true);
+  });
+
+  it('does not commit a capture that replaced the one being unlocked for', async () => {
+    const deps = makeDeps();
+    deps.pending.set(7, held());
+    deps.unlock = vi.fn(async () => { deps.pending.set(7, held({ token: 'newer', password: 'pw2' })); return ok({ unlocked: true }); });
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, deps) as NmhResponse;
+    expect(res.error?.code).toBe('bad_request');
+    expect(deps.request).not.toHaveBeenCalled();
+    expect(deps.pending.get(7)?.token).toBe('newer');
+  });
+
+  it('answers without a pending capture', async () => {
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, makeDeps({ unlock: vi.fn() })) as NmhResponse;
+    expect(res.error?.code).toBe('bad_request');
+  });
+});

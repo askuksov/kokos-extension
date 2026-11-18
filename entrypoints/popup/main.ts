@@ -56,8 +56,30 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
 
   if (view.locked) {
     const p = document.createElement('div'); p.className = 'hint';
-    p.textContent = t('unlockThenReopenSave');
-    box.appendChild(p);
+    if (view.offline) {
+      p.textContent = t('unlockThenReopenSave');
+      box.appendChild(p);
+      return;
+    }
+    // The popup closes as soon as the Kokos window takes focus; the background
+    // finishes the save after the unlock (Kokos then asks to confirm it).
+    p.textContent = t('lockedSavePrompt');
+    const who = document.createElement('div'); who.className = 'user';
+    who.textContent = view.username ? `${view.username} · ${view.site ?? ''}` : (view.site ?? '');
+    const status = document.createElement('div'); status.className = 'status hint';
+    const unlock = document.createElement('button'); unlock.className = 'primary'; unlock.textContent = t('unlockAndSave');
+    const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
+    dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id }); box.textContent = ''; };
+    unlock.onclick = async () => {
+      unlock.disabled = dismiss.disabled = true; status.textContent = t('unlockInKokos');
+      const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'unlock-and-save', tabId: tab.id });
+      if (res?.ok) { status.textContent = t('saved'); return; }
+      status.textContent = res?.error?.code === 'denied' ? t('cancelledInKokos') : t('couldNotSave');
+      unlock.disabled = dismiss.disabled = false;
+    };
+    const buttons = document.createElement('div'); buttons.className = 'save-actions';
+    buttons.append(unlock, dismiss);
+    box.append(p, who, buttons, status);
     return;
   }
 
@@ -309,10 +331,11 @@ async function render() {
   else hintEl.textContent = '';
   showState(status.ok ? (locked ? 'locked' : 'ready') : 'offline');
 
+  const enabled = await isEnabled(url);
   if (status.ok && !locked) await renderList(tab);
+  else if (locked && enabled) renderUnlock(tab);
   else listEl.textContent = '';
 
-  const enabled = await isEnabled(url);
   toggle.disabled = false;
   toggle.textContent = enabled ? t('disableHere') : t('enableHere');
   toggle.className = enabled ? '' : 'primary';
@@ -327,6 +350,25 @@ async function render() {
 
   await renderIconToggle(url, enabled);
   await renderSave(tab);
+}
+
+// Locked app on an enabled site: one button that raises the Kokos unlock
+// dialog. The popup usually closes when that window takes focus; the
+// background repaints the toolbar icon after the unlock.
+function renderUnlock(tab: chrome.tabs.Tab): void {
+  const box = document.getElementById('list')!;
+  box.textContent = '';
+  if (tab.id == null) return;
+  const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = t('unlockKokos');
+  const status = document.createElement('div'); status.className = 'status hint';
+  btn.onclick = async () => {
+    btn.disabled = true; status.textContent = t('unlockInKokos');
+    const res = await send<NmhResponse>({ type: 'request-unlock', tabId: tab.id });
+    if (res?.ok) { await render(); return; }
+    status.textContent = res?.error?.code === 'denied' ? t('unlockCancelled') : t('couldNotUnlock');
+    btn.disabled = false;
+  };
+  box.append(btn, status);
 }
 
 // "Hide the icon on this site": only on an enabled site and while the icon is on

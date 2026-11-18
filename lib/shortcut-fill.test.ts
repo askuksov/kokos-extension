@@ -27,6 +27,28 @@ describe('routeShortcutFill', () => {
     expect(out).toBe('filled-dispatch');
   });
 
+  it('on a locked app asks to unlock, then looks up again and fills', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(fail('locked'))
+      .mockResolvedValueOnce(ok({ items: [{ id: '1', title: 'A', username: 'alice' }] }));
+    const unlock = vi.fn(async () => ok({ unlocked: true }));
+    const dispatchFill = vi.fn(async () => ({ ok: true } as const));
+    const out = await routeShortcutFill(7, makeDeps({ request, unlock, dispatchFill }));
+    expect(unlock).toHaveBeenCalledWith('https://a.com/login?x=1');
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(out).toBe('filled-dispatch');
+  });
+
+  it('stops when the unlock is cancelled', async () => {
+    const request = vi.fn(async () => fail('locked'));
+    const unlock = vi.fn(async () => fail('denied'));
+    const dispatchFill = vi.fn(async () => undefined);
+    const out = await routeShortcutFill(7, makeDeps({ request, unlock, dispatchFill }));
+    expect(out).toBe('error');
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatchFill).not.toHaveBeenCalled();
+  });
+
   it('converts a null username to undefined for the fill message', async () => {
     const dispatchFill = vi.fn(async () => ({ ok: true } as const));
     const request = vi.fn(async () => ok({ items: [{ id: '9', title: 'X', username: null }] }));

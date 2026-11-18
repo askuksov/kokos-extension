@@ -33,7 +33,10 @@ interface GetPendingMsg { type: 'get-pending-save'; tabId: number; }
 interface CommitMsg { type: 'commit-pending-save'; tabId: number; token?: string; }
 interface DismissMsg { type: 'dismiss-pending-save'; tabId: number; token?: string; }
 interface NeverMsg { type: 'never-save-here'; tabId: number; }
-type SaveMsg = SaveCaptureMsg | GetPendingMsg | CommitMsg | DismissMsg | NeverMsg;
+// The popup's "Unlock and save" on a locked app: raise the app's unlock dialog,
+// then commit the live pending.
+interface UnlockSaveMsg { type: 'unlock-and-save'; tabId: number; }
+type SaveMsg = SaveCaptureMsg | GetPendingMsg | CommitMsg | DismissMsg | NeverMsg | UnlockSaveMsg;
 
 export interface SaveSenderLike {
   id?: string;
@@ -48,6 +51,8 @@ export interface PendingView {
   username?: string;
   site?: string;
   locked?: boolean;
+  // With `locked`: the app is not running at all, so there is nothing to unlock.
+  offline?: boolean;
 }
 
 export interface SaveBridgeDeps {
@@ -63,6 +68,9 @@ export interface SaveBridgeDeps {
   // Bring a fresh capture in front of the user (auto-open popup or page hint).
   // Fire-and-forget: the capture reply must not wait for UI.
   promptSave(tabId: number): void;
+  // Asks the app to unlock (unlock-bridge.ts requestUnlock), keeping its window
+  // up for the save confirm that follows. Absent = "Unlock and save" unsupported.
+  unlock?(url: string): Promise<NmhResponse>;
   now(): number;
   newToken(): string;
   gate: GateState;
@@ -72,7 +80,7 @@ export interface SaveBridgeDeps {
   captureSeq: Map<number, number>;
 }
 
-const SAVE_TYPES = new Set(['save-capture', 'get-pending-save', 'commit-pending-save', 'dismiss-pending-save', 'never-save-here']);
+const SAVE_TYPES = new Set(['save-capture', 'get-pending-save', 'commit-pending-save', 'dismiss-pending-save', 'never-save-here', 'unlock-and-save']);
 
 function isSaveMsg(msg: unknown): msg is SaveMsg {
   return typeof msg === 'object' && msg !== null && SAVE_TYPES.has((msg as { type?: string }).type ?? '');
@@ -142,7 +150,8 @@ async function viewPending(tabId: number, deps: SaveBridgeDeps): Promise<Pending
   if (!p) return { present: false };
   const { resp, items } = await itemsFor(p, deps);
   if (!resp.ok && (resp.error?.code === 'locked' || resp.error?.code === 'app_not_running')) {
-    return { present: true, locked: true, username: p.username, site: hostOf(p.url) };
+    const offline = resp.error?.code === 'app_not_running';
+    return { present: true, locked: true, offline, username: p.username, site: hostOf(p.url) };
   }
   const decision = classifySave({ username: p.username }, items);
   return { present: true, mode: decision.mode, username: p.username, site: hostOf(p.url) };
@@ -167,6 +176,18 @@ async function commit(tabId: number, token: string | undefined, deps: SaveBridge
   if (out.ok) recordSaved(deps.gate, { origin: p.origin, username: p.username, token: valueToken(p.password) });
   if (!keep) { deps.pending.delete(tabId); deps.setBadge(tabId, false); }
   return out;
+}
+
+async function unlockAndSave(tabId: number, deps: SaveBridgeDeps): Promise<NmhResponse> {
+  const p = livePending(tabId, deps);
+  if (!p) return err('bad_request', 'no pending capture');
+  if (!deps.unlock) return err('locked', 'unlock not available');
+  const token = p.token;
+  const u = await deps.unlock(p.url);
+  if (!u.ok) return u;
+  // Commit only the capture the user asked to save, not one that replaced it
+  // while the unlock dialog was open.
+  return commit(tabId, token, deps);
 }
 
 function dismiss(tabId: number, token: string | undefined, deps: SaveBridgeDeps): { ok: boolean } {
@@ -196,5 +217,6 @@ export async function routeSaveMessage(msg: unknown, sender: SaveSenderLike | un
     case 'commit-pending-save': return commit(msg.tabId, msg.token, deps);
     case 'dismiss-pending-save': return dismiss(msg.tabId, msg.token, deps);
     case 'never-save-here': return never(msg.tabId, deps);
+    case 'unlock-and-save': return unlockAndSave(msg.tabId, deps);
   }
 }

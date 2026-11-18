@@ -24,6 +24,16 @@ describe('handleBridgeMessage', () => {
     expect(pm.calls[0]).toEqual({ origin: 'https://a.com', action: 'get_logins', payload: { url: 'https://a.com' } });
   });
 
+  it('refuses request_unlock, which only unlock-bridge may send', async () => {
+    const pm = fakePM();
+    const res = await handleBridgeMessage(
+      { type: 'nmh-request', origin: 'https://a.com', action: 'request_unlock', payload: { url: 'https://a.com' } },
+      pm,
+    );
+    expect(res).toMatchObject({ ok: false, error: { code: 'denied' } });
+    expect(pm.calls).toHaveLength(0);
+  });
+
   it('defaults an absent payload to an empty object', async () => {
     const pm = fakePM();
     await handleBridgeMessage({ type: 'nmh-request', origin: 'https://a.com', action: 'ping' }, pm);
