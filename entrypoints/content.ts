@@ -75,6 +75,9 @@ function runContentScript(filled: FillMemory) {
     // app's unlock dialog. After an unlock, look up once more and show the list
     // unless a newer offer or fill took over meanwhile.
     if (!resp.ok && resp.error?.code === 'locked') {
+      // A newer offer or fill, or a field gone, makes this click stale: do not
+      // raise the app's dialog for it.
+      if (snapshot !== gen || !field.isConnected) return;
       const unlocked = await requestUnlock();
       if (!unlocked.ok || snapshot !== gen || !field.isConnected) return;
       resp = await request('get_logins', { url: url() });
@@ -344,6 +347,9 @@ export async function handleFillEntry(
 ): Promise<FillEntryResult> {
   const forms = detect(doc);
   if (forms.length === 0) return { ok: false, reason: 'no-form' };
+  // The sender looked the entry up for this origin. The tab may have moved on
+  // since (the shortcut waits for an unlock): never fill another site.
+  if (msg.origin !== undefined && msg.origin !== doc.location.origin) return { ok: false, reason: 'error' };
   const result = await fill({ id: msg.entryId, username: msg.username ?? undefined }, forms[0]!);
   return result === 'filled' ? { ok: true } : { ok: false, reason: 'error' };
 }

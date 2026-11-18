@@ -72,7 +72,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
     dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id }); box.textContent = ''; };
     unlock.onclick = async () => {
       unlock.disabled = dismiss.disabled = true; status.textContent = t('unlockInKokos');
-      const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'unlock-and-save', tabId: tab.id });
+      const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'unlock-and-save', tabId: tab.id, token: view.token });
       if (res?.ok) { status.textContent = t('saved'); return; }
       status.textContent = res?.error?.code === 'denied' ? t('cancelledInKokos') : t('couldNotSave');
       unlock.disabled = dismiss.disabled = false;
@@ -105,7 +105,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
 
   primary.onclick = async () => {
     primary.disabled = true; status.textContent = t('confirmInKokos');
-    const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'commit-pending-save', tabId: tab.id });
+    const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'commit-pending-save', tabId: tab.id, token: view.token });
     if (res?.ok) finish(isUpdate ? t('updated') : t('saved'));
     else if (res?.error?.code === 'denied') finish(t('cancelledInKokos'));
     else if (res?.error?.code === 'locked') finish(t('unlockThenReopen'));

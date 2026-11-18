@@ -200,12 +200,12 @@ export default defineBackground(() => {
     getTabUrl: pickerDeps.getTabUrl,
     request: (origin, action, payload) => pm.request(origin, action, payload),
     unlock: (url) => requestUnlock(url, false, unlockDeps),
-    dispatchFill: async (tabId, entryId, username) => {
+    dispatchFill: async (tabId, entryId, username, origin) => {
       const frameId = await resolveFillFrame(tabId, 'login');
       return new Promise((resolve) => {
         chrome.tabs.sendMessage(
           tabId,
-          { type: 'fill-entry', entryId, username },
+          { type: 'fill-entry', entryId, username, origin },
           { frameId },
           (r: FillEntryResult) => resolve(chrome.runtime.lastError ? undefined : r),
         );

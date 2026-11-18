@@ -32,6 +32,17 @@ describe('handleFillEntry', () => {
     expect(fill).toHaveBeenCalledWith({ id: 'e1', username: 'alice' }, expect.anything());
     expect(res).toEqual({ ok: true });
   });
+  it('refuses to fill when the frame is on another origin than the lookup', async () => {
+    const fill = vi.fn(async () => 'filled' as const);
+    const res = await handleFillEntry({ type: 'fill-entry', entryId: 'e1', origin: 'https://other.example' }, aForm, fill, document);
+    expect(res).toEqual({ ok: false, reason: 'error' });
+    expect(fill).not.toHaveBeenCalled();
+  });
+  it('fills when the lookup origin is the frame origin', async () => {
+    const fill = vi.fn(async () => 'filled' as const);
+    const res = await handleFillEntry({ type: 'fill-entry', entryId: 'e1', origin: document.location.origin }, aForm, fill, document);
+    expect(res).toEqual({ ok: true });
+  });
   it('maps a non-filled result to error', async () => {
     const fill = vi.fn(async () => 'error' as const);
     const res = await handleFillEntry({ type: 'fill-entry', entryId: 'e1' }, aForm, fill, document);
