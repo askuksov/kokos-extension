@@ -15,7 +15,7 @@ export type ShortcutFillOutcome = 'filled-dispatch' | 'no-login' | 'no-url' | 'e
 export interface ShortcutFillDeps {
   getTabUrl(tabId: number): Promise<string | undefined>;                 // browser-derived (chrome.tabs)
   request(origin: string, action: string, payload: object): Promise<NmhResponse>;
-  dispatchFill(tabId: number, entryId: string, username?: string): Promise<FillEntryResult | undefined>;
+  dispatchFill(tabId: number, entryId: string, username: string | undefined, origin: string): Promise<FillEntryResult | undefined>;
   // Asks the app to unlock when it is locked (unlock-bridge.ts). Absent = no unlock.
   unlock?(url: string): Promise<NmhResponse>;
 }
@@ -45,6 +45,8 @@ export async function routeShortcutFill(tabId: number, deps: ShortcutFillDeps): 
   if (!resp.ok && resp.error?.code === 'locked' && deps.unlock) {
     const u = await deps.unlock(url);
     if (!u.ok) return 'error';
+    // The unlock can take a while: stop if the tab went to another site.
+    if (httpOrigin(await deps.getTabUrl(tabId)) !== origin) return 'error';
     resp = await deps.request(origin, 'get_logins', { url });
   }
   if (!resp.ok || !resp.payload) return 'error';
@@ -52,6 +54,7 @@ export async function routeShortcutFill(tabId: number, deps: ShortcutFillDeps): 
   if (items.length === 0) return 'no-login';
 
   const best = items[0]!;
-  await deps.dispatchFill(tabId, best.id, best.username ?? undefined);
+  // The frame checks `origin` against its own before filling anything.
+  await deps.dispatchFill(tabId, best.id, best.username ?? undefined, origin);
   return 'filled-dispatch';
 }

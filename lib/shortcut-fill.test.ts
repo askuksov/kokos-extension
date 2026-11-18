@@ -23,7 +23,7 @@ describe('routeShortcutFill', () => {
     const dispatchFill = vi.fn(async () => ({ ok: true } as const));
     const out = await routeShortcutFill(7, makeDeps({ request, dispatchFill }));
     expect(request).toHaveBeenCalledWith('https://a.com', 'get_logins', { url: 'https://a.com/login?x=1' });
-    expect(dispatchFill).toHaveBeenCalledWith(7, '1', 'alice');
+    expect(dispatchFill).toHaveBeenCalledWith(7, '1', 'alice', 'https://a.com');
     expect(out).toBe('filled-dispatch');
   });
 
@@ -37,6 +37,18 @@ describe('routeShortcutFill', () => {
     expect(unlock).toHaveBeenCalledWith('https://a.com/login?x=1');
     expect(request).toHaveBeenCalledTimes(2);
     expect(out).toBe('filled-dispatch');
+  });
+
+  it('stops when the tab moved to another site during the unlock', async () => {
+    const getTabUrl = vi.fn()
+      .mockResolvedValueOnce('https://a.com/login')
+      .mockResolvedValueOnce('https://evil.example/');
+    const request = vi.fn(async () => fail('locked'));
+    const dispatchFill = vi.fn(async () => undefined);
+    const out = await routeShortcutFill(7, makeDeps({ getTabUrl, request, unlock: vi.fn(async () => ok({ unlocked: true })), dispatchFill }));
+    expect(out).toBe('error');
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatchFill).not.toHaveBeenCalled();
   });
 
   it('stops when the unlock is cancelled', async () => {
@@ -53,7 +65,7 @@ describe('routeShortcutFill', () => {
     const dispatchFill = vi.fn(async () => ({ ok: true } as const));
     const request = vi.fn(async () => ok({ items: [{ id: '9', title: 'X', username: null }] }));
     await routeShortcutFill(7, makeDeps({ request, dispatchFill }));
-    expect(dispatchFill).toHaveBeenCalledWith(7, '9', undefined);
+    expect(dispatchFill).toHaveBeenCalledWith(7, '9', undefined, 'https://a.com');
   });
 
   it('returns no-login and dispatches nothing when the site has no logins', async () => {

@@ -22,7 +22,9 @@ export interface ListSiteLoginsMsg { type: 'list-site-logins'; tabId: number; }
 export interface CopySecretMsg { type: 'copy-secret'; tabId: number; entryId: string; }
 // Popup -> content script (the frame holding the form, see frame-target.ts). Fill runs in the content script so the
 // secret never reaches the popup.
-export interface FillEntryMsg { type: 'fill-entry'; entryId: string; username?: string; }
+// `origin`, when set, is the origin the entry was looked up for; the frame
+// refuses to fill when its own origin differs.
+export interface FillEntryMsg { type: 'fill-entry'; entryId: string; username?: string; origin?: string; }
 
 export type PickerListResult = { ok: true; items: LoginItem[] } | { ok: false; code: string };
 export type PickerSecretResult = { ok: true; value: string } | { ok: false; code: string };

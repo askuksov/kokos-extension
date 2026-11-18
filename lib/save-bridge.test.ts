@@ -336,6 +336,30 @@ describe('unlock-and-save', () => {
     expect(deps.pending.get(7)?.token).toBe('newer');
   });
 
+  it('refuses a token other than the shown capture before unlocking', async () => {
+    const deps = makeDeps({ unlock: vi.fn(async () => ok({ unlocked: true })) });
+    deps.pending.set(7, held({ token: 'newer' }));
+    const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7, token: 'tok' }, popupSender, deps) as NmhResponse;
+    expect(res.error?.code).toBe('bad_request');
+    expect(deps.unlock).not.toHaveBeenCalled();
+  });
+
+  it('a second save of the same capture while one is in flight writes nothing', async () => {
+    let release!: (r: NmhResponse) => void;
+    const unlock = vi.fn(() => new Promise<NmhResponse>((r) => { release = r; }));
+    const deps = makeDeps({ unlock });
+    deps.pending.set(7, held());
+    const first = routeSaveMessage({ type: 'unlock-and-save', tabId: 7, token: 'tok' }, popupSender, deps);
+    const second = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7, token: 'tok' }, popupSender, deps) as NmhResponse;
+    expect(second.error?.code).toBe('bad_request');
+    const commitDuring = await routeSaveMessage({ type: 'commit-pending-save', tabId: 7 }, popupSender, deps) as NmhResponse;
+    expect(commitDuring.error?.code).toBe('bad_request');
+    release(fail('denied'));
+    await first;
+    expect(unlock).toHaveBeenCalledTimes(1);
+    expect(deps.pending.get(7)?.busy).toBe(false);
+  });
+
   it('answers without a pending capture', async () => {
     const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, makeDeps({ unlock: vi.fn() })) as NmhResponse;
     expect(res.error?.code).toBe('bad_request');
