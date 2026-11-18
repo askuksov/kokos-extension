@@ -43,6 +43,11 @@ export async function handleBridgeMessage(
   if (!isBridgeRequest(msg)) {
     return { id: 'invalid', ok: false, error: { code: 'bad_request', message: 'malformed bridge message' } };
   }
+  // Raising the app's unlock dialog goes through unlock-bridge.ts (enabled
+  // site, one at a time, cooldown after a cancel), never straight through here.
+  if (msg.action === 'request_unlock') {
+    return { id: 'invalid', ok: false, error: { code: 'denied', message: 'use request-unlock' } };
+  }
   const origin = trusted ? trusted.origin : msg.origin;
   const payload: Record<string, unknown> = { ...(msg.payload ?? {}) };
   if (trusted && URL_ACTIONS.has(msg.action)) payload.url = trusted.url;

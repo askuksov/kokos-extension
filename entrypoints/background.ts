@@ -12,6 +12,7 @@ import { newGateState } from '../lib/save-prompt-gate';
 import { isSaveIgnored, addSaveIgnore } from '../lib/save-ignore';
 import { routePickerMessage, type PickerBridgeDeps } from '../lib/picker-bridge';
 import { routeShortcutFill, type ShortcutFillDeps } from '../lib/shortcut-fill';
+import { newUnlockState, requestUnlock, routeUnlockMessage, type UnlockDeps } from '../lib/unlock-bridge';
 import type { FillEntryResult } from '../lib/entry-picker';
 import { resolveFillFrame } from '../lib/frame-target';
 import { promptSave, shouldRetry, type SavePromptDeps } from '../lib/save-prompt';
@@ -142,6 +143,21 @@ export default defineBackground(() => {
     }),
   };
 
+  // Raising the app's unlock dialog (see lib/unlock-bridge.ts). The popup
+  // closes as soon as the app window takes focus, so this worker owns the wait
+  // and whatever follows it (badge repaint, the pending save).
+  const unlockDeps: UnlockDeps = {
+    ownId: chrome.runtime.id,
+    request: (origin, action, payload) => pm.request(origin, action, payload),
+    isEnabled,
+    getTabUrl: async (tabId) => {
+      try { return (await chrome.tabs.get(tabId))?.url; } catch { return undefined; }
+    },
+    onUnlocked: (tabId) => { if (typeof tabId === 'number') scheduleRefresh(tabId); },
+    now: () => Date.now(),
+    state: newUnlockState(),
+  };
+
   const saveDeps: SaveBridgeDeps = {
     ownId: chrome.runtime.id,
     request: (origin, action, payload) => pm.request(origin, action, payload),
@@ -160,6 +176,7 @@ export default defineBackground(() => {
       promptedAt.set(tabId, Date.now());
       void promptSave(tabId, promptDeps);
     },
+    unlock: (url) => requestUnlock(url, true, unlockDeps),
     now: () => Date.now(),
     newToken: () =>
       typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
@@ -182,6 +199,7 @@ export default defineBackground(() => {
   const shortcutDeps: ShortcutFillDeps = {
     getTabUrl: pickerDeps.getTabUrl,
     request: (origin, action, payload) => pm.request(origin, action, payload),
+    unlock: (url) => requestUnlock(url, false, unlockDeps),
     dispatchFill: async (tabId, entryId, username) => {
       const frameId = await resolveFillFrame(tabId, 'login');
       return new Promise((resolve) => {
@@ -265,6 +283,13 @@ export default defineBackground(() => {
         refreshActiveTab();
       }, () => sendResponse({ ok: false }));
       return true;
+    }
+    if (type === 'request-unlock') {
+      routeUnlockMessage(msg, sender, unlockDeps).then(
+        (res) => sendResponse(res ?? { ok: false, error: { code: 'bad_request', message: 'bad message' } }),
+        () => sendResponse({ ok: false, error: { code: 'internal', message: 'unlock failed' } }),
+      );
+      return true; // async sendResponse
     }
     if (type === 'list-site-logins' || type === 'copy-secret' || type === 'copy-totp') {
       routePickerMessage(msg, sender, pickerDeps).then(

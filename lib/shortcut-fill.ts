@@ -16,6 +16,8 @@ export interface ShortcutFillDeps {
   getTabUrl(tabId: number): Promise<string | undefined>;                 // browser-derived (chrome.tabs)
   request(origin: string, action: string, payload: object): Promise<NmhResponse>;
   dispatchFill(tabId: number, entryId: string, username?: string): Promise<FillEntryResult | undefined>;
+  // Asks the app to unlock when it is locked (unlock-bridge.ts). Absent = no unlock.
+  unlock?(url: string): Promise<NmhResponse>;
 }
 
 function httpOrigin(url: string | undefined): string | null {
@@ -37,7 +39,14 @@ export async function routeShortcutFill(tabId: number, deps: ShortcutFillDeps): 
   const origin = httpOrigin(url);
   if (!url || !origin) return 'no-url';
 
-  const resp = await deps.request(origin, 'get_logins', { url });
+  let resp = await deps.request(origin, 'get_logins', { url });
+  // Locked: the shortcut press is the user action that may raise the app's
+  // unlock dialog; after an unlock, look up once more.
+  if (!resp.ok && resp.error?.code === 'locked' && deps.unlock) {
+    const u = await deps.unlock(url);
+    if (!u.ok) return 'error';
+    resp = await deps.request(origin, 'get_logins', { url });
+  }
   if (!resp.ok || !resp.payload) return 'error';
   const items = (resp.payload as GetLoginsResult).items ?? [];
   if (items.length === 0) return 'no-login';
