@@ -14,11 +14,12 @@ export const DENIED_COOLDOWN_MS = 30_000;
 
 export interface UnlockState {
   inflight: Promise<NmhResponse> | null;
+  inflightKeepOpen: boolean;
   deniedAt: number | null;
 }
 
 export function newUnlockState(): UnlockState {
-  return { inflight: null, deniedAt: null };
+  return { inflight: null, inflightKeepOpen: false, deniedAt: null };
 }
 
 export interface UnlockDeps {
@@ -54,13 +55,16 @@ function httpOrigin(url: string | undefined): string | null {
 
 /** Asks the app to unlock for `url`. One request at a time: a second call
  * while the dialog is open waits for the same answer. `keepOpen` keeps the
- * app window up after the unlock (a save shows its confirm prompt next). */
+ * app window up after the unlock (a save shows its confirm prompt next).
+ * A keepOpen call cannot ride on a request sent without it, so it sends its
+ * own: the app joins it to the dialog already open (still one dialog) and
+ * keeps the window up for everyone. */
 export async function requestUnlock(url: string | undefined, keepOpen: boolean, deps: UnlockDeps): Promise<NmhResponse> {
   const origin = httpOrigin(url);
   if (!url || !origin) return err('bad_request', 'no site to unlock for');
   if (!(await deps.isEnabled(url))) return err('denied', 'Kokos is not enabled on this site');
   const s = deps.state;
-  if (s.inflight) return s.inflight;
+  if (s.inflight && (s.inflightKeepOpen || !keepOpen)) return s.inflight;
   if (s.deniedAt !== null && deps.now() - s.deniedAt < DENIED_COOLDOWN_MS) {
     return err('denied', 'unlock was cancelled recently');
   }
@@ -69,10 +73,11 @@ export async function requestUnlock(url: string | undefined, keepOpen: boolean, 
     return resp;
   });
   s.inflight = p;
+  s.inflightKeepOpen = keepOpen;
   try {
     return await p;
   } finally {
-    s.inflight = null;
+    if (s.inflight === p) { s.inflight = null; s.inflightKeepOpen = false; }
   }
 }
 

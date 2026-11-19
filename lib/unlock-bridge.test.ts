@@ -53,6 +53,21 @@ describe('requestUnlock', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it('a keepOpen call does not ride on a request sent without it', async () => {
+    const releases: Array<(r: NmhResponse) => void> = [];
+    const request = vi.fn(() => new Promise<NmhResponse>((r) => { releases.push(r); }));
+    const deps = makeDeps({ request });
+    const plain = requestUnlock('https://a.com/', false, deps);
+    const save = requestUnlock('https://a.com/', true, deps);
+    const another = requestUnlock('https://a.com/', false, deps);
+    await Promise.resolve(); await Promise.resolve();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith('https://a.com', 'request_unlock', { url: 'https://a.com/', keep_open: true });
+    releases.forEach((r) => r(ok()));
+    expect((await plain).ok && (await save).ok && (await another).ok).toBe(true);
+    expect(deps.state.inflight).toBeNull();
+  });
+
   it('stays quiet for a while after the user cancels', async () => {
     let now = 1000;
     const request = vi.fn(async () => fail('denied'));
