@@ -20,6 +20,7 @@ function makeDeps(over: Partial<SaveBridgeDeps> = {}): SaveBridgeDeps {
     gate: newGateState(),
     pending: new Map<number, Pending>(),
     captureSeq: new Map<number, number>(),
+    matchChecks: new Map<string, number[]>(),
     ...over,
   };
 }
@@ -520,7 +521,8 @@ describe('typed password already stored', () => {
   it('stays quiet when the one matching login already holds this password', async () => {
     const request = vault(ok({ matches: true }));
     const deps = makeDeps({ request });
-    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: false });
+    // Same reply as a held capture: the response is not a match signal.
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
     expect(request).toHaveBeenCalledWith('https://a.com', 'login_password_matches', { entry_id: 'e1', password: 'pw', url: 'https://a.com/login' });
     expect(deps.pending.size).toBe(0);
     expect(deps.setBadge).not.toHaveBeenCalled();
@@ -544,6 +546,48 @@ describe('typed password already stored', () => {
     expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
     expect(deps.pending.get(7)).toMatchObject({ username: 'alice', password: 'pw' });
     expect(deps.promptSave).toHaveBeenCalledWith(7);
+  });
+
+  it('stops checking after 3 per site in 10 minutes and offers Update instead', async () => {
+    let t = 1000;
+    const request = vault(ok({ matches: true }));
+    const deps = makeDeps({ request, now: () => t });
+    const checks = () => request.mock.calls.filter((c) => c[1] === 'login_password_matches').length;
+    for (let i = 0; i < 3; i++) {
+      t += 60_000;
+      expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+      expect(deps.pending.size).toBe(0); // matched: quiet
+    }
+    expect(checks()).toBe(3);
+
+    t += 60_000;
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+    expect(checks()).toBe(3); // no fourth check
+    expect(deps.pending.get(7)).toMatchObject({ password: 'pw' }); // offered as if it differed
+    expect(deps.promptSave).toHaveBeenCalledWith(7);
+  });
+
+  it('keeps a separate budget per site and refills as old checks age out', async () => {
+    let t = 1000;
+    const request = vault(ok({ matches: true }));
+    const deps = makeDeps({ request, now: () => t });
+    const checks = () => request.mock.calls.filter((c) => c[1] === 'login_password_matches').length;
+    for (let i = 0; i < 3; i++) await routeSaveMessage(capture, csSender, deps);
+    await routeSaveMessage(capture, { ...csSender, origin: 'https://b.com', url: 'https://b.com/login', tab: { id: 8 } }, deps);
+    expect(checks()).toBe(4); // b.com has its own budget
+
+    t += 600_000; // a.com's checks are now 10 minutes old
+    deps.pending.clear();
+    await routeSaveMessage(capture, csSender, deps);
+    expect(checks()).toBe(5);
+    expect(deps.pending.size).toBe(0);
+  });
+
+  it('spends no budget when no check is sent', async () => {
+    const request = vi.fn(async () => ok({ items: [{ id: 'e1', username: 'bob' }] }));
+    const deps = makeDeps({ request });
+    await routeSaveMessage(capture, csSender, deps);
+    expect(deps.matchChecks.get('https://a.com') ?? []).toHaveLength(0);
   });
 
   it('asks nothing for a new login or a locked vault', async () => {
