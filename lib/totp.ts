@@ -15,15 +15,26 @@ import { setNativeValue } from './fill';
 // unchanged). Sites that omit autocomplete but hint via name/id (otp/totp/
 // 2fa/one-time) are covered here as a local fallback, kept in this module so
 // classifyField's existing classification stays byte-for-byte unchanged.
-const OTP_HINT_RE = /(otp|totp|2fa|one[\s_-]?time)/;
+// Boundaries on separators so e.g. "footprint" does not read as "otp".
+const OTP_HINT_RE = /(^|[\s_\-.[\]])(otp|totp|2fa|one[\s_-]?time)($|[\s_\-.[\]])/;
+
+/** Not hidden, not disabled: a hidden or disabled input must never receive the code. */
+function isUsable(input: HTMLInputElement): boolean {
+  if (input.disabled || input.type === 'hidden') return false;
+  if (input.closest('[hidden]')) return false;
+  const style = input.ownerDocument.defaultView?.getComputedStyle(input);
+  return !(style && (style.display === 'none' || style.visibility === 'hidden'));
+}
 
 /** First one-time-code field on the page: autocomplete=one-time-code (via
- * classifyField), or a name/id hinting otp|totp|2fa|one-time. Returns null when
- * none is present. */
+ * classifyField) first, then a name/id hinting otp|totp|2fa|one-time. Hidden and
+ * disabled inputs are skipped. Returns null when none is present. */
 export function findOtpField(root: ParentNode): HTMLInputElement | null {
-  for (const el of Array.from(root.querySelectorAll('input'))) {
-    const input = el as HTMLInputElement;
+  const inputs = (Array.from(root.querySelectorAll('input')) as HTMLInputElement[]).filter(isUsable);
+  for (const input of inputs) {
     if (classifyField(input) === 'one-time-code') return input;
+  }
+  for (const input of inputs) {
     if (OTP_HINT_RE.test(`${input.name} ${input.id}`.toLowerCase())) return input;
   }
   return null;
