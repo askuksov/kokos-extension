@@ -24,6 +24,39 @@ describe('findOtpField', () => {
     input({ type: 'text', name: 'otp' });
     expect(findOtpField(document)).not.toBeNull();
   });
+  it('prefers a later autocomplete=one-time-code field over an earlier weak name match', () => {
+    document.body.innerHTML = '';
+    input({ type: 'text', name: 'otp_hint' });
+    const strong = input({ type: 'text', autocomplete: 'one-time-code' });
+    expect(findOtpField(document)).toBe(strong);
+  });
+  it('skips hidden and disabled inputs', () => {
+    document.body.innerHTML = '';
+    input({ type: 'hidden', name: 'otp_token' });
+    input({ type: 'text', name: 'totp', disabled: '' });
+    input({ type: 'text', name: 'otp', style: 'display:none' });
+    const visible = input({ type: 'text', name: 'code', autocomplete: 'one-time-code' });
+    expect(findOtpField(document)).toBe(visible);
+  });
+  it('returns null when only hidden or disabled hint matches exist', () => {
+    document.body.innerHTML = '';
+    input({ type: 'hidden', name: 'otp_token' });
+    input({ type: 'text', id: 'totp', disabled: '' });
+    expect(findOtpField(document)).toBeNull();
+  });
+  it('does not treat a substring as an otp hint (footprint, hotpot)', () => {
+    document.body.innerHTML = '';
+    input({ type: 'text', name: 'footprint' });
+    input({ type: 'text', id: 'hotpot' });
+    expect(findOtpField(document)).toBeNull();
+  });
+  it('matches hints delimited by _ - or whitespace', () => {
+    for (const name of ['totp_code', 'login-otp', 'one-time-code', 'one_time_pass', 'user[otp]', '2fa']) {
+      document.body.innerHTML = '';
+      const el = input({ type: 'text', name });
+      expect(findOtpField(document), name).toBe(el);
+    }
+  });
   it('returns null when there is no one-time-code field', () => {
     document.body.innerHTML = '';
     input({ type: 'text', name: 'search' });
