@@ -1,5 +1,5 @@
 import {
-  buildRequest, isKeepaliveId, KEEPALIVE_PREFIX, NATIVE_HOST, PROTOCOL_VERSION,
+  buildRequest, isKeepaliveId, KEEPALIVE_PREFIX, NATIVE_HOST, NMH_CODES, PROTOCOL_VERSION,
   type NmhResponse,
 } from './nmh-client';
 import { CONSENT_REQUIRED } from './data-consent';
@@ -16,9 +16,14 @@ export interface NativePort {
 
 export type ConnectNative = (hostName: string) => NativePort;
 
+interface Pending {
+  resolve: (r: NmhResponse) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface OriginState {
   port: NativePort;
-  pending: Map<string, (r: NmhResponse) => void>;
+  pending: Map<string, Pending>;
   keepaliveTimer: ReturnType<typeof setInterval> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -28,6 +33,11 @@ const DEFAULT_KEEPALIVE_MS = 20_000;
 // live host process and keeps the MV3 service worker alive, so an origin that
 // was only probed once (the badge asks on every page) must not keep its port.
 const DEFAULT_IDLE_MS = 30_000;
+// How long a request may wait for a reply. The host gives actions that wait on
+// a human (confirm prompts, request_unlock) up to 90 s and answers with its own
+// timeout error, so this stays above that: it only fires when the host is gone
+// silent, never in place of the host's answer.
+const DEFAULT_REQUEST_TIMEOUT_MS = 100_000;
 
 /** Owns one native-messaging connection per site origin. Concurrent tabs on
  * different sites get different ports, so the app's per-connection domain
@@ -44,6 +54,7 @@ export class PortManager {
     private opts: {
       keepaliveMs?: number;
       idleMs?: number;
+      requestTimeoutMs?: number;
       allow?: (action: string) => boolean | Promise<boolean>;
     } = {},
   ) {}
@@ -76,7 +87,11 @@ export class PortManager {
         resolve(errEnvelope(req.id, 'app_not_running', 'native host unavailable'));
         return;
       }
-      state.pending.set(req.id, resolve);
+      const timer = setTimeout(
+        () => this.onRequestTimeout(origin, state, req.id),
+        this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      );
+      state.pending.set(req.id, { resolve, timer });
       this.stopIdle(state);
       this.startKeepalive(origin, state);
       try {
@@ -97,10 +112,7 @@ export class PortManager {
     this.stopIdle(state);
     try { state.port.disconnect(); } catch { /* already gone */ }
     // Fail closed any stragglers.
-    for (const [id, resolve] of state.pending) {
-      resolve(errEnvelope(id, 'app_not_running', 'connection closed'));
-    }
-    state.pending.clear();
+    this.failPending(state, 'connection closed');
     this.origins.delete(origin);
   }
 
@@ -120,24 +132,41 @@ export class PortManager {
     if (isKeepaliveId(resp.id)) return; // keepalive echo: drop
     const state = this.origins.get(origin);
     if (!state) return;
-    const resolve = state.pending.get(resp.id);
-    if (!resolve) return; // unknown id: nothing waits on it
+    const entry = state.pending.get(resp.id);
+    if (!entry) return; // unknown id (or already timed out): nothing waits on it
     state.pending.delete(resp.id);
-    resolve(resp as NmhResponse);
-    if (state.pending.size === 0) {
-      this.stopKeepalive(state);
-      this.startIdle(origin, state);
+    clearTimeout(entry.timer);
+    entry.resolve(resp as NmhResponse);
+    this.settleIfDrained(origin, state);
+  }
+
+  private onRequestTimeout(origin: string, state: OriginState, id: string): void {
+    const entry = state.pending.get(id);
+    if (!entry) return;
+    state.pending.delete(id);
+    entry.resolve(errEnvelope(id, NMH_CODES.TIMEOUT, 'native host did not reply in time'));
+    if (this.origins.get(origin) === state) this.settleIfDrained(origin, state);
+  }
+
+  private settleIfDrained(origin: string, state: OriginState): void {
+    if (state.pending.size > 0) return;
+    this.stopKeepalive(state);
+    this.startIdle(origin, state);
+  }
+
+  private failPending(state: OriginState, message: string): void {
+    for (const [id, entry] of state.pending) {
+      clearTimeout(entry.timer);
+      entry.resolve(errEnvelope(id, 'app_not_running', message));
     }
+    state.pending.clear();
   }
 
   private onDisconnectFor(origin: string, state: OriginState): void {
     if (this.origins.get(origin) !== state) return; // superseded port: ignore its late disconnect
     this.stopKeepalive(state);
     this.stopIdle(state);
-    for (const [id, resolve] of state.pending) {
-      resolve(errEnvelope(id, 'app_not_running', 'native host disconnected'));
-    }
-    state.pending.clear();
+    this.failPending(state, 'native host disconnected');
     this.origins.delete(origin);
   }
 

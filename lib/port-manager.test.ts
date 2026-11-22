@@ -276,5 +276,59 @@ describe('PortManager onDisconnect generation guard', () => {
     f.reply({ id: req.id, ok: true, payload: { running: true, locked: false } });
     await expect(p).resolves.toMatchObject({ ok: true });
   });
-});
 
+  describe('request timeout', () => {
+    it('resolves a timeout envelope when the host never replies', async () => {
+      const f = makeFakePort();
+      const pm = new PortManager(() => f.port, { requestTimeoutMs: 1000 });
+      const p = pm.request('https://a.com', 'get_logins', {});
+      const req = f.lastRealRequest();
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(p).resolves.toEqual({
+        id: req.id, ok: false, error: { code: 'timeout', message: expect.any(String) },
+      });
+    });
+
+    it('stops the keepalive and idles the port once the last request times out', async () => {
+      const f = makeFakePort();
+      const pm = new PortManager(() => f.port, { requestTimeoutMs: 1000, keepaliveMs: 300, idleMs: 500 });
+      const p = pm.request('https://a.com', 'get_logins', {});
+      await vi.advanceTimersByTimeAsync(1000);
+      await p;
+      const sentAfterTimeout = f.sent.length;
+      await vi.advanceTimersByTimeAsync(400); // would be a keepalive tick
+      expect(f.sent).toHaveLength(sentAfterTimeout);
+      await vi.advanceTimersByTimeAsync(200); // idle window elapsed
+      expect(pm.openOrigins).toEqual([]);
+    });
+
+    it('does not time out a request that got its reply, and ignores a late reply', async () => {
+      const f = makeFakePort();
+      const pm = new PortManager(() => f.port, { requestTimeoutMs: 1000 });
+      const ok = pm.request('https://a.com', 'ping', {});
+      const okReq = f.lastRealRequest();
+      f.reply({ id: okReq.id, ok: true, payload: {} });
+      await expect(ok).resolves.toMatchObject({ ok: true });
+      const slow = pm.request('https://a.com', 'ping', {});
+      const slowReq = f.lastRealRequest();
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(slow).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
+      expect(() => f.reply({ id: slowReq.id, ok: true, payload: {} })).not.toThrow();
+    });
+
+    it('keeps the keepalive running while another request is still pending', async () => {
+      const f = makeFakePort();
+      const pm = new PortManager(() => f.port, { requestTimeoutMs: 1000, keepaliveMs: 300 });
+      const first = pm.request('https://a.com', 'get_logins', {});
+      await vi.advanceTimersByTimeAsync(500);
+      const second = pm.request('https://a.com', 'get_secret', {});
+      await vi.advanceTimersByTimeAsync(500); // first expires, second still waiting
+      await expect(first).resolves.toMatchObject({ error: { code: 'timeout' } });
+      const before = f.sent.length;
+      await vi.advanceTimersByTimeAsync(300);
+      expect(f.sent.length).toBeGreaterThan(before);
+      f.reply({ id: f.sent.find((m) => m.action === 'get_secret').id, ok: true, payload: {} });
+      await expect(second).resolves.toMatchObject({ ok: true });
+    });
+  });
+});
