@@ -206,3 +206,63 @@ describe('serialized list changes', () => {
     expect(await listEnabledSites()).toEqual(['https://b.com']);
   });
 });
+
+describe('cross-context serialization (Web Locks)', () => {
+  // Two copies of the module stand in for the popup and the background: each has
+  // its own promise chain, and they share only storage and the lock manager.
+  function fakeLocks() {
+    const tails = new Map<string, Promise<unknown>>();
+    const request = vi.fn(<T,>(name: string, cb: () => Promise<T>): Promise<T> => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(cb);
+      tails.set(name, run.catch(() => {}));
+      return run;
+    });
+    return { request };
+  }
+
+  function slowReads() {
+    const get = chrome.storage.local.get as any;
+    const orig = get.getMockImplementation()!;
+    get.mockImplementation(async (k: string) => {
+      const value = await orig(k);
+      await new Promise((r) => setTimeout(r, 5));
+      return value;
+    });
+  }
+
+  async function secondContext() {
+    vi.resetModules();
+    return import('./site-access');
+  }
+
+  it('keeps both origins when two contexts enable at once', async () => {
+    installFakeChrome(true);
+    slowReads();
+    const locks = fakeLocks();
+    vi.stubGlobal('navigator', { locks });
+    const other = await secondContext();
+    await Promise.all([enableSite('https://a.com/'), other.enableSite('https://b.com/')]);
+    expect((await listEnabledSites()).sort()).toEqual(['https://a.com', 'https://b.com']);
+    expect(locks.request).toHaveBeenCalledWith('kokos-enabled-sites', expect.any(Function));
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to the in-module chain when navigator.locks is missing', async () => {
+    installFakeChrome(true);
+    slowReads();
+    vi.stubGlobal('navigator', {});
+    await Promise.all([enableSite('https://a.com/'), enableSite('https://b.com/')]);
+    expect((await listEnabledSites()).sort()).toEqual(['https://a.com', 'https://b.com']);
+    vi.unstubAllGlobals();
+  });
+
+  it('a failed locked change does not block later ones', async () => {
+    installFakeChrome(true);
+    vi.stubGlobal('navigator', { locks: fakeLocks() });
+    (chrome.storage.local.set as any).mockRejectedValueOnce(new Error('quota'));
+    await expect(enableSite('https://a.com/')).rejects.toThrow('quota');
+    await enableSite('https://b.com/');
+    expect(await listEnabledSites()).toEqual(['https://b.com']);
+    vi.unstubAllGlobals();
+  });
+});
