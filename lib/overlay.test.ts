@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, topLayerAncestor, overlayHostIntact, type OverlayMatch } from './overlay';
 
 function stubRect(el: Element, rect: Partial<DOMRect>): void {
@@ -462,58 +462,231 @@ describe('overlayHostIntact', () => {
     document.body.style.removeProperty('opacity');
   });
 
+  it('rejects a mask or hidden content-visibility on an ancestor', () => {
+    document.body.innerHTML = '<dialog style="mask-image: linear-gradient(transparent, transparent)"></dialog>'
+      + '<div popover style="-webkit-mask-image: url(x.png)"></div><section style="content-visibility: hidden"></section>';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+    expect(overlayHostIntact(hostIn(document.querySelector('[popover]')!))).toBe(false);
+    expect(overlayHostIntact(hostIn(document.querySelector('section')!))).toBe(false);
+  });
+
   it('rejects a host that is not in the document', () => {
     expect(overlayHostIntact(document.createElement('div'))).toBe(false);
   });
 });
 
 describe('activation guard', () => {
-  // The shadow root is closed; capture it at creation to press the icon and a row.
+  // The shadow root is closed; capture it at creation to press the icon and a
+  // row. jsdom events are never trusted and its clock does not step, so both
+  // are injected.
   function openOverlay(container: Element) {
     const field = document.createElement('input');
     field.type = 'password';
     field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
     container.appendChild(field);
-    (document as any).elementFromPoint = () => field; (document as any).elementsFromPoint = () => [field];
+    const env = { t: 1000, trusted: true };
     const spy = vi.spyOn(Element.prototype, 'attachShadow');
-    const ov = createOverlay(document);
+    const ov = createOverlay(document, { now: () => env.t, isTrusted: () => env.trusted });
     const root = spy.mock.results[0]!.value as ShadowRoot;
     spy.mockRestore();
-    return { field, ov, root };
+    const host = root.host as HTMLElement;
+    // Our host is topmost at any point; the field is under it.
+    (document as any).elementFromPoint = () => field;
+    (document as any).elementsFromPoint = () => [host, field];
+    const icon = root.querySelector('.kokos-icon') as HTMLElement;
+    stubRect(icon, { left: 186, top: 12, width: 20, height: 20, right: 206, bottom: 32 });
+    const rowAt = (i = 0) => {
+      const row = root.querySelectorAll('.kokos-row')[i] as HTMLElement;
+      stubRect(row, { left: 14, top: 40, width: 232, height: 44, right: 246, bottom: 84 });
+      return row;
+    };
+    const list = root.querySelector('.kokos-list') as HTMLElement;
+    return { field, ov, root, host, icon, list, rowAt, env };
+  }
+  function press(el: HTMLElement, x = 196, y = 22) {
+    el.dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, detail: 1, bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, detail: 1, bubbles: true, cancelable: true }));
   }
 
-  it('lets an icon click and a pick through when the host is plainly visible', () => {
+  it('lets an icon click and a pick through once they have stood still', () => {
     document.body.innerHTML = '';
-    const { field, ov, root } = openOverlay(document.body);
+    const { field, ov, icon, rowAt, env } = openOverlay(document.body);
     const onIcon = vi.fn();
     const onPick = vi.fn();
     ov.showIcon(field, onIcon);
-    (root.querySelector('.kokos-icon') as HTMLElement).click();
+    env.t += 400;
+    press(icon);
     expect(onIcon).toHaveBeenCalledTimes(1);
     ov.showMatches(field, [{ id: 'a', title: 'A' }], onPick);
-    (root.querySelector('.kokos-row') as HTMLElement).click();
+    env.t += 400;
+    press(rowAt(), 60, 60);
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    ov.destroy();
+  });
+
+  it('ignores untrusted events', () => {
+    document.body.innerHTML = '';
+    const { field, ov, icon, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    env.trusted = false;
+    press(icon);
+    expect(onIcon).not.toHaveBeenCalled();
+    ov.destroy();
+  });
+
+  it('ignores a click within the dwell time after showing, without closing the list', () => {
+    document.body.innerHTML = '';
+    const { field, ov, list, rowAt, env } = openOverlay(document.body);
+    const onPick = vi.fn();
+    ov.showMatches(field, [{ id: 'a', title: 'A' }], onPick);
+    env.t += 100;
+    press(rowAt(), 60, 60);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(list.style.display).toBe('block');
+    env.t += 300;
+    press(rowAt(), 60, 60);
     expect(onPick).toHaveBeenCalledTimes(1);
+    ov.destroy();
+  });
+
+  it('restarts the dwell when the icon moves', () => {
+    document.body.innerHTML = '';
+    const { field, ov, icon, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    field.getBoundingClientRect = () => ({ left: 10, top: 60, width: 200, height: 24, right: 210, bottom: 84, x: 10, y: 60, toJSON() {} }) as DOMRect;
+    ov.showIcon(field, onIcon); // moved under the pointer
+    env.t += 50;
+    press(icon);
+    expect(onIcon).not.toHaveBeenCalled();
+    ov.destroy();
+  });
+
+  it('needs a pointerdown on the same control shortly before the click', () => {
+    document.body.innerHTML = '';
+    const { field, ov, icon, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    icon.dispatchEvent(new MouseEvent('click', { clientX: 196, clientY: 22, detail: 1, cancelable: true }));
+    expect(onIcon).not.toHaveBeenCalled();
+    icon.dispatchEvent(new MouseEvent('pointerdown', { clientX: 196, clientY: 22, detail: 1 }));
+    env.t += 2500;
+    icon.dispatchEvent(new MouseEvent('click', { clientX: 196, clientY: 22, detail: 1, cancelable: true }));
+    expect(onIcon).not.toHaveBeenCalled();
+    ov.destroy();
+  });
+
+  it('honours a keyboard click only on the focused icon', () => {
+    document.body.innerHTML = '';
+    const { field, ov, root, icon, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    icon.dispatchEvent(new MouseEvent('click', { detail: 0, cancelable: true }));
+    expect(onIcon).not.toHaveBeenCalled();
+    icon.focus();
+    expect(root.activeElement).toBe(icon);
+    icon.dispatchEvent(new MouseEvent('click', { detail: 0, cancelable: true }));
+    expect(onIcon).toHaveBeenCalledTimes(1);
+    ov.destroy();
+  });
+
+  it('drops a click on an icon drawn shrunken, and closes the list', () => {
+    document.body.innerHTML = '';
+    const { field, ov, icon, list, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    ov.showMatches(field, [{ id: 'a', title: 'A' }], vi.fn());
+    env.t += 400;
+    stubRect(icon, { left: 190, top: 16, width: 10, height: 10, right: 200, bottom: 26 }); // transform: scale(0.5)
+    press(icon);
+    expect(onIcon).not.toHaveBeenCalled();
+    expect(list.style.display).toBe('none');
+    ov.destroy();
+  });
+
+  it('drops a click when another element is topmost at the pointer', () => {
+    document.body.innerHTML = '';
+    const { field, ov, icon, env, host } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    const decoy = document.createElement('div');
+    document.body.appendChild(decoy);
+    (document as any).elementsFromPoint = () => [decoy, host, field];
+    press(icon);
+    expect(onIcon).not.toHaveBeenCalled();
     ov.destroy();
   });
 
   it('drops the icon click and the pick, and closes the list, under a faded dialog', () => {
     document.body.innerHTML = '<dialog></dialog>';
     const dialog = document.querySelector('dialog')!;
-    const { field, ov, root } = openOverlay(dialog);
-    // Mount the host inside the dialog, as for a showModal() dialog.
-    const base = Element.prototype.matches;
-    (dialog as any).matches = function (sel: string) { return sel === ':modal' ? true : base.call(this, sel); };
+    markTopLayer(dialog, ':modal'); // mounts the host inside, as for showModal()
+    const { field, ov, icon, list, rowAt, env } = openOverlay(dialog);
     const onIcon = vi.fn();
     const onPick = vi.fn();
     ov.showIcon(field, onIcon);
     ov.showMatches(field, [{ id: 'a', title: 'A' }], onPick);
+    env.t += 400;
     dialog.style.opacity = '0.01';
-    (root.querySelector('.kokos-icon') as HTMLElement).click();
-    (root.querySelector('.kokos-row') as HTMLElement).click();
+    press(icon);
+    press(rowAt(), 60, 60);
     expect(onIcon).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
-    expect((root.querySelector('.kokos-list') as HTMLElement).style.display).toBe('none');
+    expect(list.style.display).toBe('none');
     ov.destroy();
+  });
+
+  describe('with IntersectionObserver v2', () => {
+    let callback: ((entries: Array<{ target: Element; isVisible: boolean }>) => void) | null = null;
+    const w = window as any;
+    beforeEach(() => {
+      w.IntersectionObserver = class {
+        constructor(cb: typeof callback) { callback = cb; }
+        observe() {} disconnect() {}
+      };
+      w.IntersectionObserverEntry = class {};
+      Object.defineProperty(w.IntersectionObserverEntry.prototype, 'isVisible', { get: () => true });
+    });
+    afterEach(() => {
+      delete w.IntersectionObserver;
+      delete w.IntersectionObserverEntry;
+      callback = null;
+      document.documentElement.style.removeProperty('filter');
+    });
+
+    it('drops a click while the icon is reported as covered', () => {
+      document.body.innerHTML = '';
+      const { field, ov, icon, env } = openOverlay(document.body);
+      const onIcon = vi.fn();
+      ov.showIcon(field, onIcon);
+      env.t += 400;
+      callback!([{ target: icon, isVisible: false }]); // a pointer-events: none decoy on top
+      press(icon);
+      expect(onIcon).not.toHaveBeenCalled();
+      callback!([{ target: icon, isVisible: true }]);
+      press(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('does not trust the verdict under a page-wide filter on <html>', () => {
+      document.body.innerHTML = '';
+      const { field, ov, icon, env } = openOverlay(document.body);
+      const onIcon = vi.fn();
+      ov.showIcon(field, onIcon);
+      env.t += 400;
+      document.documentElement.style.filter = 'invert(1)';
+      callback!([{ target: icon, isVisible: false }]);
+      press(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
   });
 });
 
