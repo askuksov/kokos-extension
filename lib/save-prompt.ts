@@ -38,3 +38,15 @@ export const RETRY_WINDOW_MS = 15_000;
 export function shouldRetry(capturedAt: number | undefined, now: number): boolean {
   return capturedAt !== undefined && now - capturedAt <= RETRY_WINDOW_MS;
 }
+
+// The background tells an open popup that the held capture for a tab changed
+// (replaced by a newer one, or expired), so the save card never shows a capture
+// other than the one a click would act on. Only the background sends it: an
+// extension context without a tab.
+export const PENDING_CHANGED = 'pending-save-changed';
+
+export function isPendingChange(msg: unknown, sender: { id?: string; tab?: unknown }, ownId: string, tabId: number): boolean {
+  if (sender.id !== ownId || sender.tab !== undefined) return false;
+  const m = msg as { type?: unknown; tabId?: unknown } | null;
+  return typeof m === 'object' && m !== null && m.type === PENDING_CHANGED && m.tabId === tabId;
+}
