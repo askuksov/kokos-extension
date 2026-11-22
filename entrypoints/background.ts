@@ -15,7 +15,7 @@ import { routeShortcutFill, type ShortcutFillDeps } from '../lib/shortcut-fill';
 import { newUnlockState, requestUnlock, routeUnlockMessage, type UnlockDeps } from '../lib/unlock-bridge';
 import type { FillEntryResult } from '../lib/entry-picker';
 import { resolveFillFrame } from '../lib/frame-target';
-import { promptSave, shouldRetry, type SavePromptDeps } from '../lib/save-prompt';
+import { promptSave, shouldRetry, PENDING_CHANGED, type SavePromptDeps } from '../lib/save-prompt';
 import {
   consentAllows, consentState, readConsentEnv, setLocalConsent, LOCAL_CONSENT_KEY,
   MANAGED_CONSENT_KEY, type ConsentState,
@@ -177,6 +177,10 @@ export default defineBackground(() => {
       void promptSave(tabId, promptDeps);
     },
     // A worker that sleeps first drops the in-memory captures anyway.
+    // No popup open = no receiver: the lastError read keeps that quiet.
+    notifyPendingChanged: (tabId) => {
+      chrome.runtime.sendMessage({ type: PENDING_CHANGED, tabId }, () => void chrome.runtime.lastError);
+    },
     scheduleSweep: (delayMs) => { setTimeout(() => sweepExpiredPending(saveDeps), delayMs); },
     unlock: (url) => requestUnlock(url, true, unlockDeps),
     now: () => Date.now(),

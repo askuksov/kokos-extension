@@ -482,3 +482,25 @@ describe('message shape', () => {
     expect(deps.addSaveIgnore).not.toHaveBeenCalled();
   });
 });
+
+describe('open popup notification', () => {
+  it('fires when a capture is held or replaced, and when it expires', async () => {
+    let t = 1000;
+    const notifyPendingChanged = vi.fn();
+    const deps = makeDeps({ now: () => t, notifyPendingChanged });
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'B' }, csSender, deps);
+    expect(notifyPendingChanged).toHaveBeenCalledTimes(2);
+    expect(notifyPendingChanged).toHaveBeenLastCalledWith(7);
+    t += PENDING_TTL_MS + 1;
+    sweepExpiredPending(deps);
+    expect(notifyPendingChanged).toHaveBeenCalledTimes(3);
+  });
+  it('stays silent for a dropped duplicate', async () => {
+    const notifyPendingChanged = vi.fn();
+    const deps = makeDeps({ notifyPendingChanged });
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    expect(notifyPendingChanged).toHaveBeenCalledTimes(1);
+  });
+});

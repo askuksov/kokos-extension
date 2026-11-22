@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { promptSave, shouldRetry, RETRY_WINDOW_MS, type SavePromptDeps } from './save-prompt';
+import { promptSave, shouldRetry, isPendingChange, PENDING_CHANGED, RETRY_WINDOW_MS, type SavePromptDeps } from './save-prompt';
 
 function makeDeps(over: Partial<SavePromptDeps> = {}): SavePromptDeps {
   return {
@@ -57,5 +57,23 @@ describe('shouldRetry', () => {
   });
   it('does not retry without a capture', () => {
     expect(shouldRetry(undefined, 1000)).toBe(false);
+  });
+});
+
+describe('isPendingChange', () => {
+  const bg = { id: 'self' };
+  it('accepts a change for the shown tab from the background', () => {
+    expect(isPendingChange({ type: PENDING_CHANGED, tabId: 7 }, bg, 'self', 7)).toBe(true);
+  });
+  it('ignores another tab', () => {
+    expect(isPendingChange({ type: PENDING_CHANGED, tabId: 8 }, bg, 'self', 7)).toBe(false);
+  });
+  it('ignores other messages', () => {
+    expect(isPendingChange({ type: 'save-capture', tabId: 7 }, bg, 'self', 7)).toBe(false);
+    expect(isPendingChange(null, bg, 'self', 7)).toBe(false);
+  });
+  it('ignores a content script or a foreign sender', () => {
+    expect(isPendingChange({ type: PENDING_CHANGED, tabId: 7 }, { id: 'self', tab: { id: 7 } }, 'self', 7)).toBe(false);
+    expect(isPendingChange({ type: PENDING_CHANGED, tabId: 7 }, { id: 'evil' }, 'self', 7)).toBe(false);
   });
 });

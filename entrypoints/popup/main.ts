@@ -7,6 +7,7 @@ import { resolveFillFrame } from '../../lib/frame-target';
 import { monogram } from '../../lib/monogram';
 import type { ConsentState } from '../../lib/data-consent';
 import { loadIconPrefs, hideIconOn, showIconOn } from '../../lib/icon-prefs';
+import { isPendingChange } from '../../lib/save-prompt';
 
 const PRIVACY_URL = 'https://kokos.kuksov.dev/en/privacy';
 
@@ -47,11 +48,21 @@ async function writeClipboard(text: string): Promise<boolean> {
   return ok;
 }
 
+// The tab whose save card is shown, a counter that lets only the newest
+// render draw, and whether a Save / Unlock and save is waiting on Kokos (its
+// result handler redraws, so a change notice must not wipe it meanwhile).
+let saveTab: chrome.tabs.Tab | undefined;
+let saveRender = 0;
+let saveInFlight = false;
+
 async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
   const box = document.getElementById('save')!;
-  box.textContent = '';
-  if (tab.id == null) return;
+  saveTab = tab;
+  const gen = ++saveRender;
+  if (tab.id == null) { box.textContent = ''; return; }
   const view = await pendingVia(tab.id);
+  if (gen !== saveRender) return; // a newer render owns the card
+  box.textContent = '';
   if (!view.present) return;
 
   if (view.locked) {
@@ -69,10 +80,12 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
     const status = document.createElement('div'); status.className = 'status hint';
     const unlock = document.createElement('button'); unlock.className = 'primary'; unlock.textContent = t('unlockAndSave');
     const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
-    dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id }); box.textContent = ''; };
+    dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); box.textContent = ''; };
     unlock.onclick = async () => {
       unlock.disabled = dismiss.disabled = true; status.textContent = t('unlockInKokos');
-      const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'unlock-and-save', tabId: tab.id, token: view.token });
+      saveInFlight = true;
+      const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'unlock-and-save', tabId: tab.id, token: view.token })
+        .finally(() => { saveInFlight = false; });
       if (res?.ok) { status.textContent = t('saved'); return; }
       // Replaced or gone meanwhile: show what is held now instead.
       if (res?.error?.code === 'bad_request') { await renderSave(tab); return; }
@@ -98,7 +111,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
   primary.textContent = isUpdate ? t('update') : t('save');
 
   const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
-  dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id }); box.textContent = ''; };
+  dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); box.textContent = ''; };
 
   const never = document.createElement('button'); never.className = 'ghost'; never.textContent = t('neverHere');
   never.onclick = async () => { await saveMsg({ type: 'never-save-here', tabId: tab.id }); box.textContent = ''; };
@@ -107,7 +120,9 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
 
   primary.onclick = async () => {
     primary.disabled = true; status.textContent = t('confirmInKokos');
-    const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'commit-pending-save', tabId: tab.id, token: view.token });
+    saveInFlight = true;
+    const res = await saveMsg<{ ok: boolean; error?: { code: string } }>({ type: 'commit-pending-save', tabId: tab.id, token: view.token })
+      .finally(() => { saveInFlight = false; });
     if (res?.ok) finish(isUpdate ? t('updated') : t('saved'));
     else if (res?.error?.code === 'denied') finish(t('cancelledInKokos'));
     else if (res?.error?.code === 'locked') finish(t('unlockThenReopen'));
@@ -120,6 +135,13 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
   buttons.append(primary, dismiss, never);
   box.append(buttons, status);
 }
+
+// A newer capture replaced the shown one, or it expired: redraw the card.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  const tab = saveTab;
+  if (tab?.id == null || saveInFlight) return;
+  if (isPendingChange(msg, sender, chrome.runtime.id, tab.id)) void renderSave(tab);
+});
 
 // Per-site login picker. Only rendered when Kokos is running + unlocked.
 async function renderList(tab: chrome.tabs.Tab): Promise<void> {
