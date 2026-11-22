@@ -12,14 +12,16 @@ import type { NmhResponse } from './nmh-client';
 // too, this only saves the round trip.
 export const DENIED_COOLDOWN_MS = 30_000;
 
+// Requests in flight, one slot per kind: a keepOpen call sends its own
+// request even while a plain one runs, and either may finish first.
 export interface UnlockState {
   inflight: Promise<NmhResponse> | null;
-  inflightKeepOpen: boolean;
+  inflightKeepOpen: Promise<NmhResponse> | null;
   deniedAt: number | null;
 }
 
 export function newUnlockState(): UnlockState {
-  return { inflight: null, inflightKeepOpen: false, deniedAt: null };
+  return { inflight: null, inflightKeepOpen: null, deniedAt: null };
 }
 
 export interface UnlockDeps {
@@ -64,7 +66,9 @@ export async function requestUnlock(url: string | undefined, keepOpen: boolean, 
   if (!url || !origin) return err('bad_request', 'no site to unlock for');
   if (!(await deps.isEnabled(url))) return err('denied', 'Kokos is not enabled on this site');
   const s = deps.state;
-  if (s.inflight && (s.inflightKeepOpen || !keepOpen)) return s.inflight;
+  // A keepOpen request answers a plain call too; the reverse does not hold.
+  const joinable = keepOpen ? s.inflightKeepOpen : (s.inflightKeepOpen ?? s.inflight);
+  if (joinable) return joinable;
   if (s.deniedAt !== null && deps.now() - s.deniedAt < DENIED_COOLDOWN_MS) {
     return err('denied', 'unlock was cancelled recently');
   }
@@ -72,12 +76,13 @@ export async function requestUnlock(url: string | undefined, keepOpen: boolean, 
     if (!resp.ok && resp.error?.code === 'denied') s.deniedAt = deps.now();
     return resp;
   });
-  s.inflight = p;
-  s.inflightKeepOpen = keepOpen;
+  if (keepOpen) s.inflightKeepOpen = p;
+  else s.inflight = p;
   try {
     return await p;
   } finally {
-    if (s.inflight === p) { s.inflight = null; s.inflightKeepOpen = false; }
+    if (s.inflight === p) s.inflight = null;
+    if (s.inflightKeepOpen === p) s.inflightKeepOpen = null;
   }
 }
 

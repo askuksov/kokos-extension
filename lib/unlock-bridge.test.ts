@@ -66,6 +66,40 @@ describe('requestUnlock', () => {
     releases.forEach((r) => r(ok()));
     expect((await plain).ok && (await save).ok && (await another).ok).toBe(true);
     expect(deps.state.inflight).toBeNull();
+    expect(deps.state.inflightKeepOpen).toBeNull();
+  });
+
+  it('a keepOpen request finishing first leaves the plain one joinable', async () => {
+    const releases: Array<(r: NmhResponse) => void> = [];
+    const request = vi.fn(() => new Promise<NmhResponse>((r) => { releases.push(r); }));
+    const deps = makeDeps({ request });
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    const plain = requestUnlock('https://a.com/', false, deps);
+    const save = requestUnlock('https://a.com/', true, deps);
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    releases[1]!(ok());
+    expect((await save).ok).toBe(true);
+    expect(deps.state.inflightKeepOpen).toBeNull();
+    expect(deps.state.inflight).not.toBeNull();
+    const again = requestUnlock('https://a.com/', false, deps);
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    releases[0]!(ok());
+    expect((await plain).ok && (await again).ok).toBe(true);
+    expect(deps.state.inflight).toBeNull();
+  });
+
+  it('a keepOpen call joins a keepOpen request in flight', async () => {
+    let release!: (r: NmhResponse) => void;
+    const request = vi.fn(() => new Promise<NmhResponse>((r) => { release = r; }));
+    const deps = makeDeps({ request });
+    const a = requestUnlock('https://a.com/', true, deps);
+    const b = requestUnlock('https://a.com/', true, deps);
+    await new Promise((r) => setTimeout(r, 0));
+    release(ok());
+    expect((await a).ok && (await b).ok).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it('stays quiet for a while after the user cancels', async () => {
