@@ -6,11 +6,11 @@
 // to any caller (the popup receives metadata only) and never logs it.
 
 import { classifySave, clampSaveField } from './save-capture';
-import { valueToken, shouldBadge, recordPrompt, recordSaved, wasSaved, forgetSaved, type GateState } from './save-prompt-gate';
+import { valueToken, shouldBadge, recordPrompt, forgetPrompt, recordSaved, wasSaved, forgetSaved, type GateState } from './save-prompt-gate';
 import type { NmhResponse, GetLoginsResult } from './nmh-client';
 
 const MAX_FIELD_CHARS = 256;    // matches the host's confirm-emit clamp
-const PENDING_TTL_MS = 120_000; // 2 min hard cap on a held capture
+export const PENDING_TTL_MS = 120_000; // 2 min hard cap on a held capture
 
 export interface Pending {
   token: string;    // supersession token; commit must present this exact value
@@ -71,6 +71,9 @@ export interface SaveBridgeDeps {
   // Bring a fresh capture in front of the user (auto-open popup or page hint).
   // Fire-and-forget: the capture reply must not wait for UI.
   promptSave(tabId: number): void;
+  // Run sweepExpiredPending after `delayMs`, so a capture nobody looks at does
+  // not outlive its TTL. Absent = expiry happens only on the next read/capture.
+  scheduleSweep?(delayMs: number): void;
   // Asks the app to unlock (unlock-bridge.ts requestUnlock), keeping its window
   // up for the save confirm that follows. Absent = "Unlock and save" unsupported.
   unlock?(url: string): Promise<NmhResponse>;
@@ -91,10 +94,27 @@ function isSaveMsg(msg: unknown): msg is SaveMsg {
 function hostOf(url: string): string { try { return new URL(url).hostname; } catch { return url; } }
 function err(code: string, message: string): NmhResponse { return { id: 'save', ok: false, error: { code, message } }; }
 
+function expired(p: Pending, deps: SaveBridgeDeps): boolean {
+  return deps.now() - p.ts > PENDING_TTL_MS;
+}
+
+// Drop an expired capture: its password, its badge, and its "already offered"
+// record, so the same login typed again later is offered again.
+function expire(tabId: number, p: Pending, deps: SaveBridgeDeps): void {
+  deps.pending.delete(tabId);
+  deps.setBadge(tabId, false);
+  forgetPrompt(deps.gate, { origin: p.origin, username: p.username, token: valueToken(p.password) });
+}
+
+/** Drop every held capture past its TTL. Safe to call at any time. */
+export function sweepExpiredPending(deps: SaveBridgeDeps): void {
+  for (const [tabId, p] of [...deps.pending]) if (expired(p, deps)) expire(tabId, p, deps);
+}
+
 function livePending(tabId: number, deps: SaveBridgeDeps): Pending | null {
   const p = deps.pending.get(tabId);
   if (!p) return null;
-  if (deps.now() - p.ts > PENDING_TTL_MS) { deps.pending.delete(tabId); deps.setBadge(tabId, false); return null; }
+  if (expired(p, deps)) { expire(tabId, p, deps); return null; }
   return p;
 }
 
@@ -118,6 +138,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   const origin = sender.origin;                 // browser-derived, unspoofable
   const url = sender.url && sender.url.length > 0 ? sender.url : origin;
   if (typeof tabId !== 'number' || !origin || !url) return { ok: false }; // not a real content-script sender
+  sweepExpiredPending(deps); // an expired capture must not dedupe this one
   const seq = (deps.captureSeq.get(tabId) ?? 0) + 1;
   deps.captureSeq.set(tabId, seq);
   const superseded = () => deps.captureSeq.get(tabId) !== seq;
@@ -145,6 +166,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);
   deps.promptSave(tabId);
+  deps.scheduleSweep?.(PENDING_TTL_MS + 1_000);
   return { ok: true };
 }
 
@@ -229,7 +251,10 @@ function dismiss(tabId: number, token: string | undefined, deps: SaveBridgeDeps)
 
 async function never(tabId: number, deps: SaveBridgeDeps): Promise<{ ok: boolean }> {
   const p = deps.pending.get(tabId);
-  if (p) { await deps.addSaveIgnore(p.url); deps.pending.delete(tabId); deps.setBadge(tabId, false); }
+  if (!p) return { ok: true };
+  await deps.addSaveIgnore(p.url);
+  // A capture that replaced this one during the write is not ours to clear.
+  if (deps.pending.get(tabId) === p) { deps.pending.delete(tabId); deps.setBadge(tabId, false); }
   return { ok: true };
 }
 

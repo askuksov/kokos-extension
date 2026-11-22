@@ -36,6 +36,13 @@ export function recordPrompt(state: GateState, k: { origin: string; username: st
   state.seen.set(keyOf(k.origin, k.username), k.token);
 }
 
+/** Drop the "already offered" record, but only while it still holds this
+ * capture's value token: a newer capture's record must survive. */
+export function forgetPrompt(state: GateState, k: { origin: string; username: string; token: string }): void {
+  const key = keyOf(k.origin, k.username);
+  if (state.seen.get(key) === k.token) state.seen.delete(key);
+}
+
 /** Remember that this exact value was written to the vault, so a repeat can be
  * re-offered if the entry is later deleted in the app. */
 export function recordSaved(state: GateState, k: { origin: string; username: string; token: string }): void {
