@@ -69,4 +69,18 @@ describe('fillTotp', () => {
     const out = await fillTotp({ request: async () => ({ id: 'r', ok: false, error: { code: 'denied', message: 'x' } }), url: 'https://s', entryId: 'e', otpField: otp, gen: 1, ...live });
     expect(out).toEqual({ status: 'error' });
   });
+
+  it('returns error when the payload has no usable code or remaining', async () => {
+    document.body.innerHTML = '';
+    const otp = input({ type: 'text', autocomplete: 'one-time-code' });
+    const bad: unknown[] = [
+      {}, { code: '', remaining: 10 }, { code: 123456, remaining: 10 },
+      { code: '123456' }, { code: '123456', remaining: '10' }, { code: '123456', remaining: Infinity },
+    ];
+    for (const payload of bad) {
+      const out = await fillTotp({ request: async () => ({ id: 'r', ok: true, payload }), url: 'https://s', entryId: 'e', otpField: otp, gen: 1, ...live });
+      expect(out).toEqual({ status: 'error' });
+      expect(otp.value).toBe('');
+    }
+  });
 });

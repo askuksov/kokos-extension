@@ -63,7 +63,9 @@ export async function fillFromMatch(
     // the user caused and the only one they can retry — the page says so.
     if (!resp.ok && resp.error?.code === 'denied') return 'denied';
     if (!resp.ok || !resp.payload) return 'error';
-    secret = (resp.payload as GetSecretResult).value;
+    const value = (resp.payload as Partial<GetSecretResult>).value;
+    if (typeof value !== 'string') return 'error';
+    secret = value;
     // Generation + liveness guard — a slow decrypt must never fill a superseded
     // or detached field (mirrors the app's reveal race-guard).
     if (deps.gen !== deps.currentGen()) return 'discarded';

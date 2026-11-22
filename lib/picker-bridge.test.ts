@@ -42,6 +42,33 @@ describe('routePickerMessage — auth & routing', () => {
   });
 });
 
+describe('routePickerMessage — field validation', () => {
+  it('rejects a missing or non-integer tabId before reading the tab', async () => {
+    const getTabUrl = vi.fn(async () => 'https://a.com/');
+    for (const tabId of [undefined, '7', 1.5, null]) {
+      const res = await routePickerMessage({ type: 'list-site-logins', tabId } as any, popup, makeDeps({ getTabUrl }));
+      expect(res).toEqual({ ok: false, code: 'bad_request' });
+    }
+    expect(getTabUrl).not.toHaveBeenCalled();
+  });
+  it('rejects copy actions without a string entryId', async () => {
+    const request = vi.fn(async () => ok({}));
+    for (const type of ['copy-secret', 'copy-totp']) {
+      for (const entryId of [undefined, 5, null]) {
+        const res = await routePickerMessage({ type, tabId: 7, entryId } as any, popup, makeDeps({ request }));
+        expect(res).toEqual({ ok: false, code: 'bad_request' });
+      }
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('does not return a copy-secret / copy-totp result with a malformed payload', async () => {
+    const secret = await routePickerMessage({ type: 'copy-secret', tabId: 7, entryId: 'e' }, popup, makeDeps({ request: vi.fn(async () => ok({})) }));
+    expect(secret).toEqual({ ok: false, code: 'internal' });
+    const totp = await routePickerMessage({ type: 'copy-totp', tabId: 7, entryId: 'e' }, popup, makeDeps({ request: vi.fn(async () => ok({ code: '1', remaining: 'x' })) }));
+    expect(totp).toEqual({ ok: false, code: 'internal' });
+  });
+});
+
 describe('list-site-logins', () => {
   it('calls get_logins with the BROWSER-DERIVED tab url + origin (not a message value) and returns metadata', async () => {
     const request = vi.fn(async () => ok({ items: [{ id: '1', title: 'A', username: 'alice', hasTotp: false }] }));
