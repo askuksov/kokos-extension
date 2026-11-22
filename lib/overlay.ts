@@ -197,6 +197,38 @@ export function topLayerAncestor(el: Element): Element | null {
   return null;
 }
 
+// Smallest product of `opacity` from the host up to the root that still
+// counts as plainly visible.
+const MIN_OPACITY = 0.9;
+
+// Whether the overlay host is plainly visible, checked at the moment the user
+// activates the icon or a match. The host inherits the opacity, filters,
+// clipping and blending of every element above it (the page's <html>, or a
+// page-owned <dialog> or popover), so a hostile page could fade, disguise or
+// clip the icon and the list and steer the user into a fill click they did not
+// mean. Any of those on the chain counts as tampering. Run on activation only:
+// it reads computed styles for the whole ancestor chain.
+export function overlayHostIntact(host: Element): boolean {
+  const view = host.ownerDocument.defaultView;
+  if (!view || !host.isConnected) return false;
+  const check = (host as Element & { checkVisibility?: (o: object) => boolean }).checkVisibility;
+  if (typeof check === 'function' && !check.call(host, { opacityProperty: true, visibilityProperty: true })) return false;
+  // An unset value reads as '' in some engines; treat it as the initial one.
+  const changed = (v: string, initial: string) => v !== '' && v !== initial;
+  let opacity = 1;
+  for (let el: Element | null = host; el; el = el.parentElement) {
+    const cs = view.getComputedStyle(el);
+    if (el === host && (cs.visibility === 'hidden' || cs.visibility === 'collapse')) return false;
+    const o = parseFloat(cs.opacity);
+    if (!Number.isNaN(o)) opacity *= o;
+    if (changed(cs.getPropertyValue('filter'), 'none')
+      || changed(cs.getPropertyValue('backdrop-filter'), 'none')
+      || changed(cs.getPropertyValue('clip-path'), 'none')
+      || changed(cs.getPropertyValue('mix-blend-mode'), 'normal')) return false;
+  }
+  return opacity >= MIN_OPACITY;
+}
+
 export function renderMatches(container: HTMLElement | ShadowRoot, matches: OverlayMatch[], onPick: (m: OverlayMatch) => void): void {
   while (container.firstChild) container.removeChild(container.firstChild);
   const doc = container instanceof ShadowRoot ? container.host.ownerDocument : container.ownerDocument;
@@ -318,15 +350,29 @@ export function createOverlay(doc: Document = document): OverlayController {
     return { left: x - o.left, top: y - o.top };
   };
 
+  // A click (or Enter/Space on the focused button) only counts while the host
+  // is plainly visible; otherwise it is dropped and the list closed.
+  const activationOk = (): boolean => {
+    if (overlayHostIntact(host)) return true;
+    list.style.display = 'none';
+    return false;
+  };
+
   let iconHandler: (() => void) | null = null;
-  icon.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); iconHandler?.(); });
+  icon.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (activationOk()) iconHandler?.();
+  });
 
   // Held so a second showToast (or an explicit hideToast) cancels the first
   // one's pending auto-hide instead of letting it blank the newer message.
   let toastTimer: ReturnType<Window['setTimeout']> | null = null;
 
   let genHandler: (() => void) | null = null;
-  gen.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); genHandler?.(); });
+  gen.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (activationOk()) genHandler?.();
+  });
 
   return {
     showIcon(field, onIconClick) {
@@ -341,7 +387,7 @@ export function createOverlay(doc: Document = document): OverlayController {
     },
     showMatches(anchor, matches, onPick) {
       attach(anchor);
-      renderMatches(list, matches, onPick);
+      renderMatches(list, matches, (m) => { if (activationOk()) onPick(m); });
       const rect = anchor.getBoundingClientRect();
       const q = at(rect.left, rect.bottom);
       list.style.left = `${q.left}px`;
