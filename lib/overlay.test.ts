@@ -144,6 +144,46 @@ describe('iconLeftAvoiding', () => {
     expect(iconLeftAvoiding(field, document, host)).toBe(186);
   });
 
+  // Markup of a PrimeNG-based password field (captured from a live site): the
+  // eye is a plain <span> with a framework click listener around an icon-font
+  // <i>, no button role, tabindex or svg.
+  function glyphEye() {
+    document.body.innerHTML = `<div class="row"><div class="tax-ui-password">
+      <input class="p-inputtext tax-ui-password__input" type="password" autocomplete="current-password">
+      <span class="tax-ui-password__eye"><i class="pi pi-eye"></i></span>
+    </div></div>`;
+    const field = document.querySelector('input')!;
+    const span = document.querySelector('span')!;
+    const glyph = document.querySelector('i')!;
+    // Field 10..210 x 10..34; eye at right: 10px, 16 wide, like the live page.
+    stubRect(field, { left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34 });
+    stubRect(span, { left: 184, top: 8, width: 16, height: 28, right: 200, bottom: 36 });
+    stubRect(glyph, { left: 184, top: 14, width: 16, height: 16, right: 200, bottom: 30 });
+    return { field, span, glyph };
+  }
+
+  it('moves left of an icon-font eye that the hit test does not report', () => {
+    const { field } = glyphEye();
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(184 - 20 - 4);
+  });
+
+  it('moves left of an icon-font eye found by the hit test', () => {
+    const { field, glyph, span } = glyphEye();
+    (document as any).elementsFromPoint = vi.fn((x: number) => (x >= 184 && x < 200 ? [glyph, span, field] : [field]));
+    expect(iconLeftAvoiding(field, document, null)).toBe(184 - 20 - 4);
+  });
+
+  it('ignores a decorative layer with an icon class that spans the whole field', () => {
+    document.body.innerHTML = '<div><div><input type="password"><span class="input-icon-frame"></span></div></div>';
+    const field = document.querySelector('input')!;
+    const frame = document.querySelector('span')!;
+    stubRect(field, { left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34 });
+    stubRect(frame, { left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34 });
+    (document as any).elementsFromPoint = vi.fn(() => [field]);
+    expect(iconLeftAvoiding(field, document, null)).toBe(186);
+  });
+
   it('falls back to the edge when there is no room left of the control', () => {
     const { field, eye } = setup(() => []);
     stubRect(eye, { left: 15, top: 12, width: 190, height: 20, right: 205, bottom: 32 });

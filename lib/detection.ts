@@ -90,6 +90,41 @@ export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventL
   return () => { frame.stop(); win.removeEventListener('resize', frame.run); };
 }
 
+// Layout that settles with no DOM mutation and no resize: a modal that scales
+// in (script-driven animations fire no DOM event), a page that hides its
+// scrollbar while a modal is open, an icon font that loads after the field
+// rendered. `onMutation` is called on every DOM change; `onSettle` runs when a
+// CSS transition or animation ends, when fonts finish loading, and once more
+// `settleMs` after the last DOM change.
+export function watchSettle(
+  doc: Document,
+  win: Pick<Window, 'setTimeout' | 'clearTimeout'>,
+  onSettle: () => void,
+  settleMs = 400,
+): { onMutation: () => void; stop: () => void } {
+  let timer: ReturnType<Window['setTimeout']> | null = null;
+  let stopped = false;
+  const fire = () => { if (!stopped) onSettle(); };
+  doc.addEventListener('transitionend', fire, true);
+  doc.addEventListener('animationend', fire, true);
+  const fonts = (doc as Document & { fonts?: EventTarget }).fonts;
+  fonts?.addEventListener?.('loadingdone', fire);
+  return {
+    onMutation() {
+      if (stopped) return;
+      if (timer !== null) win.clearTimeout(timer);
+      timer = win.setTimeout(() => { timer = null; fire(); }, settleMs);
+    },
+    stop() {
+      stopped = true;
+      if (timer !== null) win.clearTimeout(timer);
+      doc.removeEventListener('transitionend', fire, true);
+      doc.removeEventListener('animationend', fire, true);
+      fonts?.removeEventListener?.('loadingdone', fire);
+    },
+  };
+}
+
 export function sameOriginAsTop(win: Window): boolean {
   if (win === win.top) return true;
   try {

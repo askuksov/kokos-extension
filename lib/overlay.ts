@@ -111,6 +111,11 @@ export function positionFor(rect: { left: number; top: number; width: number; he
 }
 
 const CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [role="link"], [tabindex], [onclick], svg';
+// Site controls with no button semantics: an icon-font <i> or an "eye" span
+// that a framework wires up with a click listener (a PrimeNG-style password
+// field draws its show-password toggle this way). Found by geometry too, so
+// the icon does not depend on the hit test alone to see them.
+const GLYPH_SELECTOR = 'i, img, [class*="icon"], [class*="Icon"], [class*="eye"], [class*="Eye"]';
 
 // Viewport `left` for an icon at the field's right edge, moved left past any
 // page control drawn over that edge (a show-password eye, a clear button):
@@ -127,6 +132,15 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
   // between hit-test points is not missed.
   const scope = field.parentElement?.parentElement ?? field.parentElement;
   const nearby = scope ? Array.from(scope.querySelectorAll(CONTROL_SELECTOR)) : [];
+  // A glyph only counts when it is small next to the field: a decorative
+  // layer that spans the whole input (an outlined-label frame) is not a control.
+  const glyphs = scope
+    ? Array.from(scope.querySelectorAll(GLYPH_SELECTOR)).filter((g) => {
+      if (g.matches(CONTROL_SELECTOR)) return false;
+      return g.getBoundingClientRect().width <= rect.width / 2;
+    })
+    : [];
+  nearby.push(...glyphs);
   const isControl = (c: Element) => c !== exclude && !c.contains(field) && !field.contains(c);
   const visible = (c: Element) => view?.getComputedStyle(c).visibility !== 'hidden';
   // The page control (if any) the hit test finds at x, for clickable elements
