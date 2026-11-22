@@ -59,23 +59,35 @@ export function watch(target: Node, onChange: () => void): () => void {
   return () => obs.disconnect();
 }
 
-// Layout changes that touch no DOM node (a window resize re-flowing a centred
-// form) still move the fields; the icon is placed in page coordinates, so it
-// must be re-placed. Coalesced to one call per animation frame.
-export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventListener'> & Partial<Pick<Window, 'requestAnimationFrame' | 'setTimeout'>>, onChange: () => void): () => void {
+type FrameWindow = Partial<Pick<Window, 'requestAnimationFrame' | 'setTimeout'>>;
+
+// Runs `fn` at most once per animation frame however often `run()` is called
+// before that frame. The flag is cleared before `fn` runs, so a change made
+// during `fn` (or a throw) schedules a fresh frame instead of being lost.
+export function perFrame(win: FrameWindow, fn: () => void): { run: () => void; stop: () => void } {
   let pending = false;
   let stopped = false;
   const schedule = win.requestAnimationFrame
     ? (cb: () => void) => { win.requestAnimationFrame!(() => cb()); }
     : (cb: () => void) => { (win.setTimeout ?? setTimeout)(cb, 16); };
-  const onResize = () => {
-    if (pending) return;
-    pending = true;
-    // A frame queued before stop() must not call back after it.
-    schedule(() => { pending = false; if (!stopped) onChange(); });
+  return {
+    run() {
+      if (pending || stopped) return;
+      pending = true;
+      // A frame queued before stop() must not call back after it.
+      schedule(() => { pending = false; if (!stopped) fn(); });
+    },
+    stop() { stopped = true; },
   };
-  win.addEventListener('resize', onResize, { passive: true });
-  return () => { stopped = true; win.removeEventListener('resize', onResize); };
+}
+
+// Layout changes that touch no DOM node (a window resize re-flowing a centred
+// form) still move the fields; the icon is placed in page coordinates, so it
+// must be re-placed. Coalesced to one call per animation frame.
+export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventListener'> & FrameWindow, onChange: () => void): () => void {
+  const frame = perFrame(win, onChange);
+  win.addEventListener('resize', frame.run, { passive: true });
+  return () => { frame.stop(); win.removeEventListener('resize', frame.run); };
 }
 
 export function sameOriginAsTop(win: Window): boolean {
