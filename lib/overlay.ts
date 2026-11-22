@@ -322,6 +322,8 @@ export interface OverlayController {
 // click on it counts, and a click must follow its pointerdown within PAIR_MS.
 const DWELL_MS = 300;
 const PAIR_MS = 2000;
+// How often a moving pointer re-checks the host while it rests on a control.
+const HOVER_CHECK_MS = 50;
 
 export interface OverlayOptions {
   // Injected by tests only: jsdom cannot produce trusted events or a clock to step.
@@ -427,6 +429,12 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   //   caught too. A keyboard click (detail 0, on the focused button) has no
   //   pointerdown and no point to test.
   // - Dwell: the control must not have been shown or moved within DWELL_MS.
+  // - Hover dwell (mouse and pen, not touch): the pointer must have rested on
+  //   the control for DWELL_MS while it was plainly visible. The visibility
+  //   check runs when the pointer enters and, throttled, as it moves; a failed
+  //   check restarts the hover. A control that pops up under a resting cursor
+  //   gets a fresh pointerover, and one made visible (opacity) while the
+  //   cursor rests on it was last seen hidden, so neither click counts.
   // - The host chain must be plainly visible (overlayHostIntact), the control
   //   drawn at close to its CSS size and inside the viewport.
   // - Occlusion: where IntersectionObserver v2 exists (Chrome), its last
@@ -465,6 +473,9 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     seenAt.set(el, r);
     return !prev || Math.abs(r.left - prev.left) > 2 || Math.abs(r.top - prev.top) > 2;
   };
+  // Since when the pointer has rested on each control while it looked intact.
+  const hoverSince = new Map<Element, number>();
+  const hoverCheckedAt = new Map<Element, number>();
   const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
     if (!isTrusted(e)) return 'tamper';
     if (movedOnScreen(ioTarget)) shownAt.set(ioTarget, now());
@@ -474,6 +485,8 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     // A row cut off by the viewport edge is ordinary; scroll and click again.
     if (!insideViewport(control, view)) return 'wait';
     if (ioVisible.get(ioTarget) === false && !pageFiltered()) return 'tamper';
+    if (e.type === 'pointerdown' && (e as PointerEvent).pointerType !== 'touch'
+      && now() - (hoverSince.get(control) ?? Infinity) < DWELL_MS) return 'wait';
     const keyboard = e.type === 'click' && e.detail === 0;
     if (keyboard) return root.activeElement === control ? 'ok' : 'tamper';
     if (typeof doc.elementsFromPoint === 'function' && doc.elementsFromPoint(e.clientX, e.clientY)[0] !== host) return 'tamper';
@@ -482,6 +495,17 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   let armed: { control: Element; at: number } | null = null;
   // Wires the guard onto one control; `act` runs only for a click that passed.
   const guard = (control: HTMLElement, ioTarget: Element, w: number, h: number, act: () => void) => {
+    const checkHover = (e: Event) => {
+      if (!isTrusted(e) || (e as PointerEvent).pointerType === 'touch') return;
+      hoverCheckedAt.set(control, now());
+      if (!overlayHostIntact(host)) hoverSince.delete(control);
+      else if (!hoverSince.has(control)) hoverSince.set(control, now());
+    };
+    control.addEventListener('pointerover', checkHover);
+    control.addEventListener('pointermove', (e) => {
+      if (now() - (hoverCheckedAt.get(control) ?? -Infinity) >= HOVER_CHECK_MS) checkHover(e);
+    });
+    control.addEventListener('pointerleave', () => { hoverSince.delete(control); });
     control.addEventListener('pointerdown', (e) => {
       const v = verdict(e as MouseEvent, control, ioTarget, w, h);
       armed = v === 'ok' ? { control, at: now() } : null;
