@@ -176,6 +176,27 @@ export function iconLeftAvoiding(field: Element, doc: Document, exclude: Element
   return original;
 }
 
+function matchesSafe(el: Element, selector: string): boolean {
+  try { return el.matches(selector); } catch { return false; } // selector unknown to this engine
+}
+
+// The nearest ancestor of `el` that the browser renders in the top layer: a
+// modal <dialog> (showModal) or an open popover. Everything else sits under
+// the top layer whatever its z-index, and a modal dialog makes everything
+// outside it inert, so the overlay must live inside this element to be seen
+// and clicked.
+function inTopLayerNow(a: Element): boolean {
+  return (a.localName === 'dialog' && matchesSafe(a, ':modal'))
+    || (a.hasAttribute('popover') && matchesSafe(a, ':popover-open'));
+}
+
+export function topLayerAncestor(el: Element): Element | null {
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    if (inTopLayerNow(a)) return a;
+  }
+  return null;
+}
+
 export function renderMatches(container: HTMLElement | ShadowRoot, matches: OverlayMatch[], onPick: (m: OverlayMatch) => void): void {
   while (container.firstChild) container.removeChild(container.firstChild);
   const doc = container instanceof ShadowRoot ? container.host.ownerDocument : container.ownerDocument;
@@ -229,7 +250,8 @@ export interface OverlayController {
 export function createOverlay(doc: Document = document): OverlayController {
   const view = doc.defaultView!;
   const host = doc.createElement('div');
-  host.style.cssText = 'position:absolute;top:0;left:0;width:0;height:0;z-index:2147483647;';
+  const HOST_CSS = 'top:0;left:0;width:0;height:0;margin:0;padding:0;border:0;z-index:2147483647;';
+  host.style.cssText = `position:absolute;${HOST_CSS}`;
   const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
   style.textContent = OVERLAY_CSS;
@@ -263,9 +285,37 @@ export function createOverlay(doc: Document = document): OverlayController {
   // <html>, and the host goes with the old one (seen on Plane). Without
   // re-attaching, every show* below would style a detached node and nothing
   // would appear. Called before each show, so the next scan brings it back.
+  //
+  // A field inside a modal <dialog> or an open popover moves the host into
+  // that top-layer element (see topLayerAncestor); a field elsewhere moves it
+  // back. Inside, the host is `position: fixed`, so the list and the toast are
+  // not clipped by the dialog's own scroll box, and coordinates are taken
+  // relative to the host's own box (a transformed dialog becomes the
+  // containing block). Called before each show with its anchor. A field
+  // outside the top layer does not pull the host out of a dialog or popover
+  // that is still open: with icons on fields both inside and outside an open
+  // popover, moving the host back and forth would re-trigger the scan forever.
   let destroyed = false;
-  const attach = () => {
-    if (!destroyed && !host.isConnected) doc.documentElement.appendChild(host);
+  let inTopLayer = false;
+  const attach = (anchor: Element | null) => {
+    if (destroyed) return;
+    const current = host.isConnected ? host.parentElement : null;
+    const target = (anchor ? topLayerAncestor(anchor) : null)
+      ?? (current && current !== doc.documentElement && inTopLayerNow(current) ? current : doc.documentElement);
+    if (host.parentElement !== target) target.appendChild(host);
+    const fixed = target !== doc.documentElement;
+    if (fixed !== inTopLayer) {
+      inTopLayer = fixed;
+      host.style.cssText = `position:${fixed ? 'fixed' : 'absolute'};${HOST_CSS}`;
+    }
+  };
+  // Host-local coordinates for a viewport point. At the document root the host
+  // scrolls with the page, so the page scroll is added; inside the top layer
+  // the host's own box is the origin.
+  const at = (x: number, y: number): { left: number; top: number } => {
+    if (!inTopLayer) return { left: x + view.scrollX, top: y + view.scrollY };
+    const o = host.getBoundingClientRect();
+    return { left: x - o.left, top: y - o.top };
   };
 
   let iconHandler: (() => void) | null = null;
@@ -281,45 +331,49 @@ export function createOverlay(doc: Document = document): OverlayController {
   return {
     showIcon(field, onIconClick) {
       if (!isFillableGeometry(field, host)) { this.hide(); return; }
-      attach();
-      const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
-      icon.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;
-      icon.style.top = `${p.top}px`;
+      attach(field);
+      const p = positionFor(field.getBoundingClientRect(), 0, 0);
+      const q = at(iconLeftAvoiding(field, doc, host), p.top);
+      icon.style.left = `${q.left}px`;
+      icon.style.top = `${q.top}px`;
       icon.style.display = 'grid';
       iconHandler = onIconClick;
     },
     showMatches(anchor, matches, onPick) {
-      attach();
+      attach(anchor);
       renderMatches(list, matches, onPick);
       const rect = anchor.getBoundingClientRect();
-      list.style.left = `${rect.left + view.scrollX}px`;
-      list.style.top = `${rect.bottom + view.scrollY}px`;
+      const q = at(rect.left, rect.bottom);
+      list.style.left = `${q.left}px`;
+      list.style.top = `${q.top}px`;
       list.style.display = 'block';
     },
     showGeneratorIcon(field, onClick) {
       if (!isFillableGeometry(field, host)) { gen.style.display = 'none'; return; }
-      attach();
-      const p = positionFor(field.getBoundingClientRect(), view.scrollX, view.scrollY);
-      gen.style.left = `${iconLeftAvoiding(field, doc, host) + view.scrollX}px`;
-      gen.style.top = `${p.top}px`;
+      attach(field);
+      const p = positionFor(field.getBoundingClientRect(), 0, 0);
+      const q = at(iconLeftAvoiding(field, doc, host), p.top);
+      gen.style.left = `${q.left}px`;
+      gen.style.top = `${q.top}px`;
       gen.style.display = 'grid';
       genHandler = onClick;
     },
     hideGenerator() { gen.style.display = 'none'; },
     showToast(anchor, text, ms = 4000) {
-      attach();
+      attach(anchor);
       if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
       toast.textContent = text; // display-only text node; closed shadow DOM hides it from the page
       const rect = anchor.getBoundingClientRect();
+      const q = at(rect.left, rect.bottom + 4);
       toast.style.position = '';
       toast.style.right = '';
-      toast.style.left = `${rect.left + view.scrollX}px`;
-      toast.style.top = `${rect.bottom + view.scrollY + 4}px`;
+      toast.style.left = `${q.left}px`;
+      toast.style.top = `${q.top}px`;
       toast.style.display = 'block';
       if (ms > 0) toastTimer = view.setTimeout(() => { toastTimer = null; this.hideToast(); }, ms);
     },
     showNotice(text, ms = 8000) {
-      attach();
+      attach(null);
       if (toastTimer !== null) { view.clearTimeout(toastTimer); toastTimer = null; }
       toast.textContent = text;
       toast.style.position = 'fixed';
