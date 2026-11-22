@@ -12,6 +12,7 @@
 
 import type { NmhResponse, GetLoginsResult, GetSecretResult, GetTotpResult } from './nmh-client';
 import type { ListSiteLoginsMsg, CopySecretMsg, CopyTotpMsg, PickerListResult, PickerSecretResult, CopyTotpResult } from './entry-picker';
+import { httpOrigin } from './url';
 
 export interface PickerSenderLike {
   id?: string;
@@ -37,17 +38,6 @@ function hasValidFields(msg: ListSiteLoginsMsg | CopySecretMsg | CopyTotpMsg): b
   const m = msg as { tabId?: unknown; entryId?: unknown };
   if (!Number.isInteger(m.tabId)) return false;
   return msg.type === 'list-site-logins' || typeof m.entryId === 'string';
-}
-
-function httpOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return u.origin;
-  } catch {
-    return null;
-  }
 }
 
 /** The one function `chrome.runtime.onMessage` delegates the picker flow to.

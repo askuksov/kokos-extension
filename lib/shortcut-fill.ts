@@ -9,6 +9,7 @@
 
 import type { NmhResponse, GetLoginsResult } from './nmh-client';
 import type { FillEntryResult } from './entry-picker';
+import { httpOrigin } from './url';
 
 export type ShortcutFillOutcome = 'filled-dispatch' | 'no-login' | 'no-url' | 'error';
 
@@ -18,17 +19,6 @@ export interface ShortcutFillDeps {
   dispatchFill(tabId: number, entryId: string, username: string | undefined, origin: string): Promise<FillEntryResult | undefined>;
   // Asks the app to unlock when it is locked (unlock-bridge.ts). Absent = no unlock.
   unlock?(url: string): Promise<NmhResponse>;
-}
-
-function httpOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return u.origin;
-  } catch {
-    return null;
-  }
 }
 
 /** Fill the best-matching login on the active tab. Best match = items[0] from
@@ -55,6 +45,8 @@ export async function routeShortcutFill(tabId: number, deps: ShortcutFillDeps): 
 
   const best = items[0]!;
   // The frame checks `origin` against its own before filling anything.
-  await deps.dispatchFill(tabId, best.id, best.username ?? undefined, origin);
-  return 'filled-dispatch';
+  // undefined = no frame answered (no content script on the tab, or the
+  // browser's "Receiving end does not exist"); nothing was filled either way.
+  const res = await deps.dispatchFill(tabId, best.id, best.username ?? undefined, origin);
+  return res?.ok ? 'filled-dispatch' : 'error';
 }
