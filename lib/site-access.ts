@@ -36,13 +36,21 @@ async function setList(list: string[]): Promise<void> {
 
 // Every list change is a read, an await and a write. Overlapping changes (two
 // grants at once, onRemoved or reconcile during an enable) would both read the
-// same list and the second write would drop the first one's origin. All
-// changes go through this one promise chain instead. Slow work (permission
-// prompts, script registration) stays outside it.
+// same list and the second write would drop the first one's origin.
+// - Within one context (popup, options page or background each load their own
+//   copy of this module) changes go through one promise chain.
+// - Across contexts the Web Locks API serializes the read-modify-write; where
+//   it is missing the chain is all there is.
+// Slow work (permission prompts, script registration) stays outside both.
+const LOCK_NAME = 'kokos-enabled-sites';
 let listQueue: Promise<unknown> = Promise.resolve();
 
+type LockManagerLike = { request<T>(name: string, callback: () => Promise<T>): Promise<T> };
+
 function updateList(change: (list: string[]) => string[]): Promise<void> {
-  const run = listQueue.then(async () => setList(change(await getList())));
+  const write = async () => setList(change(await getList()));
+  const locks = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator?.locks;
+  const run = listQueue.then(() => (locks ? locks.request(LOCK_NAME, write) : write()));
   listQueue = run.catch(() => { /* a failed change must not block later ones */ });
   return run;
 }
