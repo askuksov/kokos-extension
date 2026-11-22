@@ -54,6 +54,15 @@ describe('handleBridgeMessage', () => {
     expect(res.ok).toBe(false);
     expect(pm.calls).toHaveLength(0);
   });
+
+  it('fails closed when the payload is not a plain object', async () => {
+    const pm = fakePM();
+    for (const payload of ['x', 7, null, ['a']]) {
+      const res = await handleBridgeMessage({ type: 'nmh-request', origin: 'https://a.com', action: 'ping', payload }, pm);
+      expect(res.error?.code).toBe('bad_request');
+    }
+    expect(pm.calls).toHaveLength(0);
+  });
 });
 
 function fakePm() {

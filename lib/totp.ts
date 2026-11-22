@@ -55,8 +55,11 @@ export async function fillTotp(deps: TotpFillDeps): Promise<TotpFillOutcome> {
   try {
     const resp = await deps.request('get_totp', { entry_id: deps.entryId, url: deps.url });
     if (!resp.ok || !resp.payload) return { status: 'error' };
-    code = (resp.payload as GetTotpResult).code;
-    const remaining = (resp.payload as GetTotpResult).remaining;
+    const p = resp.payload as Partial<GetTotpResult>;
+    if (typeof p.code !== 'string' || p.code === '') return { status: 'error' };
+    if (typeof p.remaining !== 'number' || !Number.isFinite(p.remaining)) return { status: 'error' };
+    code = p.code;
+    const remaining = p.remaining;
     if (deps.gen !== deps.currentGen()) return { status: 'discarded' };
     if (!deps.isConnected(otpField)) return { status: 'discarded' };
     setNativeValue(otpField, code);
