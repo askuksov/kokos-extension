@@ -74,6 +74,9 @@ export interface SaveBridgeDeps {
   // Run sweepExpiredPending after `delayMs`, so a capture nobody looks at does
   // not outlive its TTL. Absent = expiry happens only on the next read/capture.
   scheduleSweep?(delayMs: number): void;
+  // Tell an open popup that the capture held for this tab was replaced or
+  // expired, so it redraws the save card. Fire-and-forget.
+  notifyPendingChanged?(tabId: number): void;
   // Asks the app to unlock (unlock-bridge.ts requestUnlock), keeping its window
   // up for the save confirm that follows. Absent = "Unlock and save" unsupported.
   unlock?(url: string): Promise<NmhResponse>;
@@ -114,6 +117,7 @@ function expired(p: Pending, deps: SaveBridgeDeps): boolean {
 function expire(tabId: number, p: Pending, deps: SaveBridgeDeps): void {
   deps.pending.delete(tabId);
   deps.setBadge(tabId, false);
+  deps.notifyPendingChanged?.(tabId);
   forgetPrompt(deps.gate, { origin: p.origin, username: p.username, token: valueToken(p.password) });
 }
 
@@ -177,6 +181,7 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   deps.pending.set(tabId, { token: deps.newToken(), username: msg.username, password: msg.password, url, origin, ts: deps.now() });
   deps.setBadge(tabId, true);
   deps.promptSave(tabId);
+  deps.notifyPendingChanged?.(tabId);
   deps.scheduleSweep?.(PENDING_TTL_MS + 1_000);
   return { ok: true };
 }
