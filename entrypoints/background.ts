@@ -189,6 +189,7 @@ export default defineBackground(() => {
     gate: newGateState(),
     pending,
     captureSeq,
+    matchChecks: new Map<string, number[]>(),
   };
 
   const pickerDeps: PickerBridgeDeps = {

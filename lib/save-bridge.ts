@@ -11,6 +11,12 @@ import type { NmhResponse, GetLoginsResult } from './nmh-client';
 
 const MAX_FIELD_CHARS = 256;    // matches the host's confirm-emit clamp
 export const PENDING_TTL_MS = 120_000; // 2 min hard cap on a held capture
+// A page script can submit forms itself and see whether a save prompt follows,
+// so each password-match check is a guess it can test. The app caps them too;
+// past this per-site budget the check is skipped and Update is offered as if
+// the password differed, which tells the page nothing new.
+const MATCH_CHECKS_MAX = 3;
+const MATCH_CHECKS_WINDOW_MS = 600_000;
 
 export interface Pending {
   token: string;    // supersession token; commit must present this exact value
@@ -87,6 +93,8 @@ export interface SaveBridgeDeps {
   // Per-tab capture counter: a capture that finished its async checks after a
   // newer one from the same tab must not overwrite that newer capture.
   captureSeq: Map<number, number>;
+  // Per-origin times of recent password-match checks (MATCH_CHECKS_MAX).
+  matchChecks: Map<string, number[]>;
 }
 
 const SAVE_TYPES = new Set(['save-capture', 'get-pending-save', 'commit-pending-save', 'dismiss-pending-save', 'never-save-here', 'unlock-and-save']);
@@ -150,13 +158,22 @@ async function vaultHasLogin(origin: string, url: string, username: string, deps
 
 // True when the one login this would update already holds exactly this
 // password (typed by hand, not filled from Kokos). The app answers yes/no
-// only; an older app without the action, a locked vault or any other error
-// reads as "no", which keeps today's Update prompt.
+// only; an older app without the action, a locked vault, a spent budget or any
+// other error reads as "no", which keeps today's Update prompt.
+function takeMatchCheck(origin: string, deps: SaveBridgeDeps): boolean {
+  const now = deps.now();
+  const recent = (deps.matchChecks.get(origin) ?? []).filter((t) => now - t < MATCH_CHECKS_WINDOW_MS);
+  const allowed = recent.length < MATCH_CHECKS_MAX;
+  if (allowed) recent.push(now);
+  deps.matchChecks.set(origin, recent);
+  return allowed;
+}
+
 async function alreadyStored(origin: string, url: string, username: string, password: string, deps: SaveBridgeDeps): Promise<boolean> {
   const { resp, items } = await itemsFor({ origin, url }, deps);
   if (!resp.ok) return false;
   const decision = classifySave({ username }, items);
-  if (decision.mode !== 'update') return false;
+  if (decision.mode !== 'update' || !takeMatchCheck(origin, deps)) return false;
   const check = await deps.request(origin, 'login_password_matches', { entry_id: decision.entryId, password, url });
   return check.ok && (check.payload as { matches?: unknown } | undefined)?.matches === true;
 }
@@ -187,8 +204,9 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
     forgetSaved(deps.gate, key);
   }
   // Nothing to save or update. Not recorded in the gate: if the vault copy
-  // changes later, the same typed password must be offered again.
-  if (await alreadyStored(origin, url, msg.username, msg.password, deps)) return { ok: false };
+  // changes later, the same typed password must be offered again. Answers like
+  // a held capture, so the reply never tells a match from a mismatch.
+  if (await alreadyStored(origin, url, msg.username, msg.password, deps)) return { ok: true };
   // Consent can be withdrawn while the checks above awaited storage: ask again
   // right before the password is held.
   if (await noConsent()) return { ok: false };
