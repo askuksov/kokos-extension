@@ -27,7 +27,9 @@ function isBridgeRequest(msg: unknown): msg is BridgeRequest {
   const m = msg as Record<string, unknown>;
   return m.type === 'nmh-request'
     && typeof m.origin === 'string' && m.origin.length > 0
-    && typeof m.action === 'string' && m.action.length > 0;
+    && typeof m.action === 'string' && m.action.length > 0
+    && (m.payload === undefined
+      || (typeof m.payload === 'object' && m.payload !== null && !Array.isArray(m.payload)));
 }
 
 /** The single entry both content scripts and the dev smoke hook use to reach the

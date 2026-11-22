@@ -49,6 +49,13 @@ describe('fillFromMatch', () => {
     expect(d.passwordField!.value).toBe('');
     expect(d.usernameField!.value).toBe('');
   });
+  it('reports an error, not a fill, when the secret is not a string', async () => {
+    for (const payload of [{}, { value: 42 }, { value: null }]) {
+      const d = deps({}, { id: 'x', ok: true, payload });
+      expect(await fillFromMatch(d, MATCH)).toBe('error');
+      expect(d.passwordField!.value).toBe('');
+    }
+  });
   it('discards when the password field detached during the await', async () => {
     const d = deps({}, ok);
     d.passwordField!.remove();

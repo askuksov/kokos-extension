@@ -30,6 +30,15 @@ function isPickerMsg(msg: unknown): msg is ListSiteLoginsMsg | CopySecretMsg | C
   return typeof msg === 'object' && msg !== null && PICKER_TYPES.has((msg as { type?: string }).type ?? '');
 }
 
+// The popup is trusted but the shape is still checked before anything is
+// derived from it: an integer tabId always, a string entryId for the two
+// actions that name an entry.
+function hasValidFields(msg: ListSiteLoginsMsg | CopySecretMsg | CopyTotpMsg): boolean {
+  const m = msg as { tabId?: unknown; entryId?: unknown };
+  if (!Number.isInteger(m.tabId)) return false;
+  return msg.type === 'list-site-logins' || typeof m.entryId === 'string';
+}
+
 function httpOrigin(url: string | undefined): string | null {
   if (!url) return null;
   try {
@@ -54,6 +63,7 @@ export async function routePickerMessage(
   if (!isPickerMsg(msg)) return null;
   if (!sender || sender.id !== deps.ownId) return { ok: false, code: 'denied' };
   if (typeof sender.tab?.id === 'number') return { ok: false, code: 'denied' }; // popup-only
+  if (!hasValidFields(msg)) return { ok: false, code: 'bad_request' };
 
   const url = await deps.getTabUrl(msg.tabId);
   const origin = httpOrigin(url);
@@ -68,12 +78,17 @@ export async function routePickerMessage(
   if (msg.type === 'copy-totp') {
     const resp = await deps.request(origin, 'get_totp', { entry_id: msg.entryId, url });
     if (!resp.ok || !resp.payload) return { ok: false, code: resp.error?.code ?? 'internal' };
-    const p = resp.payload as GetTotpResult;
+    const p = resp.payload as Partial<GetTotpResult>;
+    if (typeof p.code !== 'string' || p.code === '' || typeof p.remaining !== 'number' || !Number.isFinite(p.remaining)) {
+      return { ok: false, code: 'internal' };
+    }
     return { ok: true, code: p.code, remaining: p.remaining };
   }
 
   // copy-secret
   const resp = await deps.request(origin, 'get_secret', { entry_id: msg.entryId, url });
   if (!resp.ok || !resp.payload) return { ok: false, code: resp.error?.code ?? 'internal' };
-  return { ok: true, value: (resp.payload as GetSecretResult).value };
+  const value = (resp.payload as Partial<GetSecretResult>).value;
+  if (typeof value !== 'string') return { ok: false, code: 'internal' };
+  return { ok: true, value };
 }
