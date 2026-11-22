@@ -44,13 +44,17 @@ export function detectLoginForms(root: ParentNode): LoginForm[] {
     else if (role === 'new-password' && !g.nw) g.nw = input;
     groups.set(key, g);
   }
-  const out: LoginForm[] = [];
+  // Forms with a password field come first: callers act on forms[0], and a
+  // stray username-like field earlier in the page (a newsletter or signup
+  // email box outside any form) must not win over the real login form.
+  const withPassword: LoginForm[] = [];
+  const usernameOnly: LoginForm[] = [];
   for (const g of groups.values()) {
-    if (g.cur) out.push({ username: g.u, password: g.cur });
+    if (g.cur) withPassword.push({ username: g.u, password: g.cur });
     else if (g.nw) continue; // signup / change-password — not a login
-    else if (g.u) out.push({ username: g.u, password: null });
+    else if (g.u) usernameOnly.push({ username: g.u, password: null });
   }
-  return out;
+  return [...withPassword, ...usernameOnly];
 }
 
 export function watch(target: Node, onChange: () => void): () => void {
