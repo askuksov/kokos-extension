@@ -91,6 +91,17 @@ const SAVE_TYPES = new Set(['save-capture', 'get-pending-save', 'commit-pending-
 function isSaveMsg(msg: unknown): msg is SaveMsg {
   return typeof msg === 'object' && msg !== null && SAVE_TYPES.has((msg as { type?: string }).type ?? '');
 }
+// Senders are authenticated by extension id, but the shape is still checked
+// before anything is derived from it: a capture needs a string username and a
+// non-empty string password; a popup message an integer tabId and, when given,
+// a string token.
+function hasValidFields(msg: SaveMsg): boolean {
+  const m = msg as { username?: unknown; password?: unknown; tabId?: unknown; token?: unknown };
+  if (msg.type === 'save-capture') {
+    return typeof m.username === 'string' && typeof m.password === 'string' && m.password.length > 0;
+  }
+  return Number.isInteger(m.tabId) && (m.token === undefined || typeof m.token === 'string');
+}
 function hostOf(url: string): string { try { return new URL(url).hostname; } catch { return url; } }
 function err(code: string, message: string): NmhResponse { return { id: 'save', ok: false, error: { code, message } }; }
 
@@ -265,6 +276,7 @@ async function never(tabId: number, deps: SaveBridgeDeps): Promise<{ ok: boolean
 export async function routeSaveMessage(msg: unknown, sender: SaveSenderLike | undefined, deps: SaveBridgeDeps): Promise<unknown> {
   if (!isSaveMsg(msg)) return null;
   if (!sender || sender.id !== deps.ownId) return { ok: false, code: 'denied' };
+  if (!hasValidFields(msg)) return { ok: false, code: 'bad_request' };
   if (msg.type === 'save-capture') return handleCapture(msg, sender, deps);
   // Popup-only actions: must come from an extension page (no tab), never a frame.
   if (typeof sender.tab?.id === 'number') return { ok: false, code: 'denied' };

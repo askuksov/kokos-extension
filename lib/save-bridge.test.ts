@@ -441,3 +441,44 @@ describe('pending lifecycle', () => {
     expect(await routeSaveMessage(capture('B'), { ...csSender, tab: { id: 9 } }, deps)).toEqual({ ok: false });
   });
 });
+
+describe('message shape', () => {
+  it.each([
+    ['a non-string username', { username: 42, password: 'pw' }],
+    ['a missing username', { password: 'pw' }],
+    ['a non-string password', { username: 'alice', password: { length: 3 } }],
+    ['an empty password', { username: 'alice', password: '' }],
+  ])('drops a capture with %s before any state change', async (_name, fields) => {
+    const hasConsent = vi.fn(async () => true);
+    const deps = makeDeps({ hasConsent });
+    const res = await routeSaveMessage({ type: 'save-capture', ...fields }, csSender, deps);
+    expect(res).toEqual({ ok: false, code: 'bad_request' });
+    expect(deps.pending.size).toBe(0);
+    expect(deps.captureSeq.size).toBe(0);
+    expect(deps.gate.seen.size).toBe(0);
+    expect(hasConsent).not.toHaveBeenCalled();
+    expect(deps.setBadge).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty username (password-only forms)', async () => {
+    const deps = makeDeps();
+    expect(await routeSaveMessage({ type: 'save-capture', username: '', password: 'pw' }, csSender, deps)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['get-pending-save', { tabId: '7' }],
+    ['commit-pending-save', { tabId: 7.5 }],
+    ['commit-pending-save', { tabId: 7, token: 1 }],
+    ['dismiss-pending-save', { tabId: 7, token: null }],
+    ['never-save-here', {}],
+    ['unlock-and-save', { tabId: 7, token: ['tok'] }],
+  ])('rejects %s with malformed fields %o', async (type, fields) => {
+    const deps = makeDeps({ unlock: vi.fn() });
+    deps.pending.set(7, { token: 'tok', username: 'alice', password: 'pw', url: 'https://a.com/x', origin: 'https://a.com', ts: 1000 });
+    const res = await routeSaveMessage({ type, ...fields }, popupSender, deps);
+    expect(res).toEqual({ ok: false, code: 'bad_request' });
+    expect(deps.pending.has(7)).toBe(true);
+    expect(deps.request).not.toHaveBeenCalled();
+    expect(deps.addSaveIgnore).not.toHaveBeenCalled();
+  });
+});
