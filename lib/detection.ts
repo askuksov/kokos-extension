@@ -32,11 +32,31 @@ export function classifyField(el: HTMLInputElement): FieldRole {
   return 'unknown';
 }
 
+/** Can the user see and type in this input? False for type=hidden, an
+ * effectively disabled control (own attribute or a disabled fieldset, minus
+ * its first legend), a hidden/display:none ancestor, or visibility:hidden.
+ * Computed style and attributes only, so it also works without layout (jsdom). */
+export function isUsableField(input: HTMLInputElement): boolean {
+  if (input.type === 'hidden' || input.matches(':disabled')) return false;
+  const view = input.ownerDocument.defaultView;
+  // display is not inherited: a display:none ancestor hides the subtree while
+  // the input's own computed display stays unchanged, so walk up.
+  for (let el: Element | null = input; el; el = el.parentElement) {
+    if (el.hasAttribute('hidden')) return false;
+    if (view?.getComputedStyle(el).display === 'none') return false;
+  }
+  // visibility is inherited, so the input's own computed value is the answer.
+  return view?.getComputedStyle(input).visibility !== 'hidden';
+}
+
 export function detectLoginForms(root: ParentNode): LoginForm[] {
   const groups = new Map<HTMLFormElement | null, { u: HTMLInputElement | null; cur: HTMLInputElement | null; nw: HTMLInputElement | null }>();
   for (const el of Array.from(root.querySelectorAll('input'))) {
     const input = el as HTMLInputElement;
     const role = classifyField(input);
+    // Only classified fields are checked: the style walk is not free. A hidden
+    // form must not displace a visible one in forms[0].
+    if (role === 'unknown' || !isUsableField(input)) continue;
     const key = input.form ?? null;
     const g = groups.get(key) ?? { u: null, cur: null, nw: null };
     if (role === 'username' && !g.u) g.u = input;

@@ -38,6 +38,16 @@ describe('findOtpField', () => {
     const visible = input({ type: 'text', name: 'code', autocomplete: 'one-time-code' });
     expect(findOtpField(document)).toBe(visible);
   });
+  it('skips inputs inside a display:none or [hidden] wrapper', () => {
+    document.body.innerHTML = '<div style="display:none"><div><input name="otp"></div></div><div hidden><input name="totp"></div>';
+    const visible = input({ type: 'text', name: 'otp_code' });
+    expect(findOtpField(document)).toBe(visible);
+  });
+  it('skips inputs inside a disabled fieldset', () => {
+    document.body.innerHTML = '<fieldset disabled><input name="otp"></fieldset>';
+    const enabled = input({ type: 'text', name: 'totp' });
+    expect(findOtpField(document)).toBe(enabled);
+  });
   it('returns null when only hidden or disabled hint matches exist', () => {
     document.body.innerHTML = '';
     input({ type: 'hidden', name: 'otp_token' });
@@ -137,6 +147,14 @@ describe('one digit per box', () => {
     const rest = boxes(2);
     expect(findOtpField(document)).toBe(first[0]); // the hidden one is dropped; 4 usable remain adjacent
     expect(findOtpBoxes(first[0]!)).toEqual([...first, ...rest]);
+  });
+
+  it('fills the visible field, not a hidden wrapper copy before it', async () => {
+    document.body.innerHTML = '<div style="display:none"><input name="otp"></div>';
+    const visible = input({ type: 'text', name: 'otp' });
+    const out = await run(findOtpField(document), '123456');
+    expect(out).toEqual({ status: 'filled', remaining: 20 });
+    expect(visible.value).toBe('123456');
   });
 
   it('prefers a single one-time-code field over box detection (mixed page)', async () => {
