@@ -50,6 +50,11 @@ export async function handleBridgeMessage(
   if (msg.action === 'request_unlock') {
     return { id: 'invalid', ok: false, error: { code: 'denied', message: 'use request-unlock' } };
   }
+  // A yes/no answer on a stored password is for the save flow (save-bridge.ts)
+  // only, never for a page-facing caller.
+  if (msg.action === 'login_password_matches') {
+    return { id: 'invalid', ok: false, error: { code: 'denied', message: 'save flow only' } };
+  }
   const origin = trusted ? trusted.origin : msg.origin;
   const payload: Record<string, unknown> = { ...(msg.payload ?? {}) };
   if (trusted && URL_ACTIONS.has(msg.action)) payload.url = trusted.url;

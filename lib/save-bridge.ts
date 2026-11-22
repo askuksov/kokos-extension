@@ -148,6 +148,19 @@ async function vaultHasLogin(origin: string, url: string, username: string, deps
   return items.some((i) => (i.username ?? '').trim().toLowerCase() === key);
 }
 
+// True when the one login this would update already holds exactly this
+// password (typed by hand, not filled from Kokos). The app answers yes/no
+// only; an older app without the action, a locked vault or any other error
+// reads as "no", which keeps today's Update prompt.
+async function alreadyStored(origin: string, url: string, username: string, password: string, deps: SaveBridgeDeps): Promise<boolean> {
+  const { resp, items } = await itemsFor({ origin, url }, deps);
+  if (!resp.ok) return false;
+  const decision = classifySave({ username }, items);
+  if (decision.mode !== 'update') return false;
+  const check = await deps.request(origin, 'login_password_matches', { entry_id: decision.entryId, password, url });
+  return check.ok && (check.payload as { matches?: unknown } | undefined)?.matches === true;
+}
+
 async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: SaveBridgeDeps): Promise<{ ok: boolean }> {
   const tabId = sender.tab?.id;
   const origin = sender.origin;                 // browser-derived, unspoofable
@@ -173,6 +186,9 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
     if (superseded()) return { ok: false };
     forgetSaved(deps.gate, key);
   }
+  // Nothing to save or update. Not recorded in the gate: if the vault copy
+  // changes later, the same typed password must be offered again.
+  if (await alreadyStored(origin, url, msg.username, msg.password, deps)) return { ok: false };
   // Consent can be withdrawn while the checks above awaited storage: ask again
   // right before the password is held.
   if (await noConsent()) return { ok: false };
