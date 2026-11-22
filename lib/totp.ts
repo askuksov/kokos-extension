@@ -7,7 +7,7 @@
 // liveness guard) so a slow confirm/decrypt never fills a superseded/detached field.
 
 import type { NmhResponse, GetTotpResult } from './nmh-client';
-import { classifyField } from './detection';
+import { classifyField, isUsableField } from './detection';
 import { setNativeValue } from './fill';
 
 // detection.ts's classifyField only recognises one-time-code via the
@@ -23,16 +23,8 @@ const BOX_MIN = 4;
 const BOX_MAX = 8;
 const BOX_TYPES = new Set(['', 'text', 'tel', 'number', 'password']);
 
-/** Not hidden, not disabled: a hidden or disabled input must never receive the code. */
-function isUsable(input: HTMLInputElement): boolean {
-  if (input.disabled || input.type === 'hidden') return false;
-  if (input.closest('[hidden]')) return false;
-  const style = input.ownerDocument.defaultView?.getComputedStyle(input);
-  return !(style && (style.display === 'none' || style.visibility === 'hidden'));
-}
-
 function usableInputs(root: ParentNode): HTMLInputElement[] {
-  return (Array.from(root.querySelectorAll('input')) as HTMLInputElement[]).filter(isUsable);
+  return (Array.from(root.querySelectorAll('input')) as HTMLInputElement[]).filter(isUsableField);
 }
 
 function isBox(input: HTMLInputElement): boolean {

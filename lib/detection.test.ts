@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { classifyField, detectLoginForms, watch, watchLayout, watchSettle, perFrame, sameOriginAsTop } from './detection';
+import { classifyField, detectLoginForms, isUsableField, watch, watchLayout, watchSettle, perFrame, sameOriginAsTop } from './detection';
 
 function input(attrs: Record<string, string>): HTMLInputElement {
   const el = document.createElement('input');
@@ -307,5 +307,60 @@ describe('sameOriginAsTop', () => {
   it('false when reading top.location.origin throws (cross-origin)', () => {
     const w = { location: { origin: 'https://a.com' }, top: { get location() { throw new Error('cross-origin'); } } } as any;
     expect(sameOriginAsTop(w)).toBe(false);
+  });
+});
+
+describe('isUsableField', () => {
+  const mount = (html: string) => { document.body.innerHTML = html; return document.querySelector('input')!; };
+
+  it('accepts a plain visible input', () => {
+    expect(isUsableField(mount('<input name="a">'))).toBe(true);
+  });
+  it('rejects type=hidden, disabled, and visibility:hidden inputs', () => {
+    expect(isUsableField(mount('<input type="hidden">'))).toBe(false);
+    expect(isUsableField(mount('<input disabled>'))).toBe(false);
+    expect(isUsableField(mount('<input style="visibility:hidden">'))).toBe(false);
+  });
+  it('rejects an input inside a display:none or [hidden] ancestor', () => {
+    expect(isUsableField(mount('<div style="display:none"><div><input></div></div>'))).toBe(false);
+    expect(isUsableField(mount('<div hidden><input></div>'))).toBe(false);
+  });
+  it('keeps an input visible when an ancestor is visibility:hidden but the input resets it', () => {
+    expect(isUsableField(mount('<div style="visibility:hidden"><input style="visibility:visible"></div>'))).toBe(true);
+  });
+  it('rejects an input in a disabled fieldset, except inside its first legend', () => {
+    expect(isUsableField(mount('<fieldset disabled><input></fieldset>'))).toBe(false);
+    expect(isUsableField(mount('<fieldset disabled><legend><input></legend></fieldset>'))).toBe(true);
+  });
+});
+
+describe('detectLoginForms with unusable fields', () => {
+  it('a hidden password form does not displace a visible username-step form', () => {
+    document.body.innerHTML = `
+      <form id="visible"><input name="email" type="email"></form>
+      <div style="display:none"><form id="hidden"><input name="user" type="email"><input name="password" type="password"></form></div>`;
+    const forms = detectLoginForms(document);
+    expect(forms).toHaveLength(1);
+    expect(forms[0]!.password).toBeNull();
+    expect(forms[0]!.username?.getAttribute('name')).toBe('email');
+  });
+  it('still puts a usable password form ahead of a username-only form', () => {
+    document.body.innerHTML = `
+      <input name="newsletter_email" type="email">
+      <form><input name="password" type="password"></form>`;
+    const forms = detectLoginForms(document);
+    expect(forms[0]!.password?.getAttribute('name')).toBe('password');
+  });
+  it('keeps username-only detection when the only password form is hidden', () => {
+    document.body.innerHTML = `
+      <form><input name="email" type="email"></form>
+      <form><input name="password" type="password" disabled></form>`;
+    const forms = detectLoginForms(document);
+    expect(forms).toHaveLength(1);
+    expect(forms[0]!.username?.getAttribute('name')).toBe('email');
+  });
+  it('ignores a type=hidden username field', () => {
+    document.body.innerHTML = '<form><input name="user" type="hidden" autocomplete="username"></form>';
+    expect(detectLoginForms(document)).toEqual([]);
   });
 });
