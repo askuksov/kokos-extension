@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { classifyField, detectLoginForms, watch, watchLayout, sameOriginAsTop } from './detection';
+import { classifyField, detectLoginForms, watch, watchLayout, perFrame, sameOriginAsTop } from './detection';
 
 function input(attrs: Record<string, string>): HTMLInputElement {
   const el = document.createElement('input');
@@ -133,6 +133,70 @@ describe('watchLayout', () => {
     resize();
     expect(frames).toHaveLength(0);
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe('perFrame', () => {
+  function frameWindow() {
+    const frames: Array<() => void> = [];
+    const win = { requestAnimationFrame: (cb: FrameRequestCallback) => { frames.push(() => cb(0)); return frames.length; } };
+    return { win, frames };
+  }
+
+  it('runs once per frame however many calls arrive before it', () => {
+    const { win, frames } = frameWindow();
+    const fn = vi.fn();
+    const f = perFrame(win as any, fn);
+    f.run(); f.run(); f.run();
+    expect(fn).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(1);
+    frames.shift()!();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the flag before calling, so a change made during the call queues a new frame', () => {
+    const { win, frames } = frameWindow();
+    let f: ReturnType<typeof perFrame>;
+    const fn = vi.fn(() => { if (fn.mock.calls.length === 1) f.run(); });
+    f = perFrame(win as any, fn);
+    f.run();
+    frames.shift()!();
+    expect(frames).toHaveLength(1);
+    frames.shift()!();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps scheduling after a call throws', () => {
+    const { win, frames } = frameWindow();
+    const fn = vi.fn(() => { throw new Error('boom'); });
+    const f = perFrame(win as any, fn);
+    f.run();
+    expect(() => frames.shift()!()).toThrow('boom');
+    f.run();
+    expect(frames).toHaveLength(1);
+  });
+
+  it('drops a queued frame after stop() and ignores later calls', () => {
+    const { win, frames } = frameWindow();
+    const fn = vi.fn();
+    const f = perFrame(win as any, fn);
+    f.run();
+    f.stop();
+    frames.shift()!();
+    f.run();
+    expect(frames).toHaveLength(0);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a timer without requestAnimationFrame', () => {
+    const timers: Array<() => void> = [];
+    const win = { setTimeout: (cb: () => void) => { timers.push(cb); return timers.length; } };
+    const fn = vi.fn();
+    const f = perFrame(win as any, fn);
+    f.run(); f.run();
+    expect(timers).toHaveLength(1);
+    timers.shift()!();
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 

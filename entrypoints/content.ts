@@ -2,7 +2,7 @@
 // content_scripts match). Orchestrates detect -> get_logins -> overlay ->
 // get_secret -> fill. Runs only in a frame same-origin with the top page.
 
-import { detectLoginForms, sameOriginAsTop, watch, watchLayout, type LoginForm } from '../lib/detection';
+import { detectLoginForms, sameOriginAsTop, watch, watchLayout, perFrame, type LoginForm } from '../lib/detection';
 import { createOverlay, type OverlayMatch, type OverlayController } from '../lib/overlay';
 import { fillFromMatch, type FillOutcome } from '../lib/fill';
 import type { NmhResponse, GetLoginsResult } from '../lib/nmh-client';
@@ -180,7 +180,10 @@ function runContentScript(filled: FillMemory) {
   // Observes the Document, not <html>: a page that swaps out its root element
   // (seen on a React SPA that recovers from a hydration error) would leave an
   // observer on the old <html> silent, and the icon would never come back.
-  watch(document, () => { scan(); });
+  // A busy SPA mutates many times per frame; one scan per frame is enough and
+  // spares the layout reads each scan makes.
+  const scanSoon = perFrame(window, scan);
+  watch(document, scanSoon.run);
   watchLayout(window, () => { scan(); });
 
   // Lets the popup and the shortcut find the frame that holds the form. Lives in
