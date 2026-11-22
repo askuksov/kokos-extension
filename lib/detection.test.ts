@@ -55,6 +55,20 @@ describe('detectLoginForms', () => {
     </form>`;
     expect(detectLoginForms(root)).toHaveLength(0);
   });
+  it('puts a password form before an earlier formless username field', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `<input name="cta" type="text" autocomplete="username">
+      <form>
+        <input name="email" type="text" autocomplete="username">
+        <input name="pw" type="password" autocomplete="current-password">
+      </form>`;
+    const forms = detectLoginForms(root);
+    expect(forms).toHaveLength(2);
+    expect(forms[0]!.password?.getAttribute('name')).toBe('pw');
+    expect(forms[0]!.username?.getAttribute('name')).toBe('email');
+    expect(forms[1]!.password).toBeNull();
+    expect(forms[1]!.username?.getAttribute('name')).toBe('cta');
+  });
 });
 
 describe('watch', () => {
