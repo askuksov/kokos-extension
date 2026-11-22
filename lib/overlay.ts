@@ -212,8 +212,12 @@ const MIN_OPACITY = 0.9;
 // or blend mode on <html> or <body>: that applies to the whole page alike (a
 // dark-mode extension's invert filter, a site-wide grayscale) and cannot set
 // the overlay apart from the content the user sees. Opacity and visibility
-// count everywhere. Run on activation only: it reads computed styles for the
-// whole ancestor chain.
+// count everywhere. A host inside a modal dialog or open popover is checked up
+// to and including that top-layer element and no further: the top layer is
+// painted apart from the element's ancestors, so their opacity, filters and
+// clipping do not reach it (inherited `visibility` still does, and is read
+// from the host). Run on activation only: it reads computed styles for the
+// ancestor chain.
 export function overlayHostIntact(host: Element): boolean {
   const doc = host.ownerDocument;
   const view = doc.defaultView;
@@ -239,6 +243,7 @@ export function overlayHostIntact(host: Element): boolean {
       || changed(cs.getPropertyValue('-webkit-mask-image'), 'none')
       || changed(cs.getPropertyValue('-webkit-mask-box-image-source'), 'none')
       || cs.getPropertyValue('content-visibility') === 'hidden') return false;
+    if (el !== host && inTopLayerNow(el)) break;
   }
   return opacity >= MIN_OPACITY;
 }
@@ -374,13 +379,21 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // outside the top layer does not pull the host out of a dialog or popover
   // that is still open: with icons on fields both inside and outside an open
   // popover, moving the host back and forth would re-trigger the scan forever.
+  //
+  // The login icon and the generator icon share the host, so they must agree
+  // on one parent: the login icon's wins, and a generator icon whose field
+  // needs another one is not drawn while the login icon shows (otherwise two
+  // open popovers would bounce the host between them on every scan).
   let destroyed = false;
   let inTopLayer = false;
+  const targetFor = (anchor: Element | null): Element => {
+    const current = host.isConnected ? host.parentElement : null;
+    return (anchor ? topLayerAncestor(anchor) : null)
+      ?? (current && current !== doc.documentElement && inTopLayerNow(current) ? current : doc.documentElement);
+  };
   const attach = (anchor: Element | null) => {
     if (destroyed) return;
-    const current = host.isConnected ? host.parentElement : null;
-    const target = (anchor ? topLayerAncestor(anchor) : null)
-      ?? (current && current !== doc.documentElement && inTopLayerNow(current) ? current : doc.documentElement);
+    const target = targetFor(anchor);
     if (host.parentElement !== target) target.appendChild(host);
     const fixed = target !== doc.documentElement;
     if (fixed !== inTopLayer) {
@@ -390,11 +403,18 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   };
   // Host-local coordinates for a viewport point. At the document root the host
   // scrolls with the page, so the page scroll is added; inside the top layer
-  // the host's own box is the origin.
+  // the host's own box is the origin, and a scaled top-layer element (the
+  // host's containing block) scales everything in it, so the offset is divided
+  // by that scale: drawn size over layout size. Rotation and skew are not
+  // undone.
   const at = (x: number, y: number): { left: number; top: number } => {
     if (!inTopLayer) return { left: x + view.scrollX, top: y + view.scrollY };
     const o = host.getBoundingClientRect();
-    return { left: x - o.left, top: y - o.top };
+    const box = host.parentElement as HTMLElement | null;
+    const r = box?.getBoundingClientRect();
+    const sx = box && r && box.offsetWidth > 0 && r.width > 0 ? r.width / box.offsetWidth : 1;
+    const sy = box && r && box.offsetHeight > 0 && r.height > 0 ? r.height / box.offsetHeight : 1;
+    return { left: (x - o.left) / sx, top: (y - o.top) / sy };
   };
 
   // Activation guard against DOM-based clickjacking: a page that fades,
@@ -435,8 +455,19 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     const f = view.getComputedStyle(el).getPropertyValue('filter');
     return f !== '' && f !== 'none';
   });
+  // Where each control was last seen on screen. The dwell restarts whenever
+  // that moves, whatever moved it: a re-placement by a scan, or the page
+  // shifting a top-layer element with the host inside it (no scan at all).
+  const seenAt = new Map<Element, DOMRect>();
+  const movedOnScreen = (el: Element): boolean => {
+    const r = el.getBoundingClientRect();
+    const prev = seenAt.get(el);
+    seenAt.set(el, r);
+    return !prev || Math.abs(r.left - prev.left) > 2 || Math.abs(r.top - prev.top) > 2;
+  };
   const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
     if (!isTrusted(e)) return 'tamper';
+    if (movedOnScreen(ioTarget)) shownAt.set(ioTarget, now());
     if (now() - (shownAt.get(ioTarget) ?? -Infinity) < DWELL_MS) return 'wait';
     if (!overlayHostIntact(host)) return 'tamper';
     if (!drawnFullSize(control, w, h)) return 'tamper';
@@ -467,15 +498,14 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
       else if (v === 'tamper') list.style.display = 'none';
     });
   };
-  // Records when a control was shown or moved, for the dwell check.
-  const placed = (el: HTMLElement, left: string, top: string) => {
-    const moved = el.style.display === 'none'
-      || Math.abs(parseFloat(el.style.left) - parseFloat(left)) > 2
-      || Math.abs(parseFloat(el.style.top) - parseFloat(top)) > 2
-      || Number.isNaN(parseFloat(el.style.left));
-    if (moved) shownAt.set(el, now());
-    el.style.left = left;
-    el.style.top = top;
+  // Places a control and restarts its dwell when it was hidden or now sits
+  // somewhere else on screen.
+  const placed = (el: HTMLElement, left: number, top: number, display: string) => {
+    const wasHidden = el.style.display === 'none';
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.display = display;
+    if (movedOnScreen(el) || wasHidden) shownAt.set(el, now());
   };
 
   let iconHandler: (() => void) | null = null;
@@ -495,8 +525,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
       attach(field);
       const p = positionFor(field.getBoundingClientRect(), 0, 0);
       const q = at(iconLeftAvoiding(field, doc, host), p.top);
-      placed(icon, `${q.left}px`, `${q.top}px`);
-      icon.style.display = 'grid';
+      placed(icon, q.left, q.top, 'grid');
       iconHandler = onIconClick;
     },
     showMatches(anchor, matches, onPick) {
@@ -508,19 +537,41 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
         guard(row, list, ROW_MIN_WIDTH, ROW_MIN_HEIGHT, () => onPick(m));
       });
       const rect = anchor.getBoundingClientRect();
-      const q = at(rect.left, rect.bottom);
-      list.style.left = `${q.left}px`;
-      list.style.top = `${q.top}px`;
-      shownAt.set(list, now()); // a freshly opened list always waits out the dwell
+      const put = (x: number, y: number) => {
+        const q = at(x, y);
+        list.style.left = `${q.left}px`;
+        list.style.top = `${q.top}px`;
+      };
+      put(rect.left, rect.bottom);
       list.style.display = 'block';
+      // Keep the list on screen so its rows can pass the guard's viewport
+      // check: shift it left off the right edge, and open it above the field
+      // when there is no room below. A list that fits stays at the anchor.
+      const r = list.getBoundingClientRect();
+      const vw = view.innerWidth || doc.documentElement.clientWidth;
+      const vh = view.innerHeight || doc.documentElement.clientHeight;
+      const pad = 4;
+      let dx = 0;
+      let dy = 0;
+      if (r.width > 0 && r.right > vw - pad) dx = Math.max(pad - r.left, vw - pad - r.right);
+      if (r.height > 0 && r.bottom > vh - pad) {
+        const above = rect.top - pad - r.height; // visual top when opened above
+        dy = above >= pad ? above - r.top : Math.max(pad - r.top, vh - pad - r.bottom);
+      }
+      if (dx !== 0 || dy !== 0) put(rect.left + dx, rect.bottom + dy);
+      shownAt.set(list, now()); // a freshly opened list always waits out the dwell
+      seenAt.set(list, list.getBoundingClientRect());
     },
     showGeneratorIcon(field, onClick) {
       if (!isFillableGeometry(field, host)) { gen.style.display = 'none'; return; }
+      if (icon.style.display !== 'none' && host.isConnected && targetFor(field) !== host.parentElement) {
+        gen.style.display = 'none'; // the login icon holds the host elsewhere
+        return;
+      }
       attach(field);
       const p = positionFor(field.getBoundingClientRect(), 0, 0);
       const q = at(iconLeftAvoiding(field, doc, host), p.top);
-      placed(gen, `${q.left}px`, `${q.top}px`);
-      gen.style.display = 'grid';
+      placed(gen, q.left, q.top, 'grid');
       genHandler = onClick;
     },
     hideGenerator() { gen.style.display = 'none'; },

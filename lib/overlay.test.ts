@@ -310,6 +310,98 @@ describe('topLayerAncestor', () => {
   });
 });
 
+describe('overlay host placement', () => {
+  function overlayWithRoot() {
+    const spy = vi.spyOn(Element.prototype, 'attachShadow');
+    const ov = createOverlay(document);
+    const root = spy.mock.results[0]!.value as ShadowRoot;
+    spy.mockRestore();
+    return { ov, root, host: root.host as HTMLElement, list: root.querySelector('.kokos-list') as HTMLElement, gen: root.querySelector('.kokos-gen') as HTMLElement };
+  }
+  function fieldAt(container: Element, left: number, top: number): HTMLInputElement {
+    const field = document.createElement('input');
+    field.type = 'password';
+    stubRect(field, { left, top, width: 200, height: 24, right: left + 200, bottom: top + 24 });
+    container.appendChild(field);
+    return field;
+  }
+  // The list's drawn box follows its style (host at the page origin, no scroll).
+  function listFollowsStyle(list: HTMLElement) {
+    list.getBoundingClientRect = () => {
+      const l = parseFloat(list.style.left);
+      const t = parseFloat(list.style.top) + 4; // margin-top
+      return { left: l, top: t, width: 240, height: 100, right: l + 240, bottom: t + 100, x: l, y: t, toJSON() {} } as DOMRect;
+    };
+  }
+
+  it('keeps one parent when the login and generator fields sit in different open popovers', () => {
+    document.body.innerHTML = '<div id="a" popover></div><div id="b" popover></div>';
+    const a = document.getElementById('a')!;
+    const b = document.getElementById('b')!;
+    markTopLayer(a, ':popover-open');
+    markTopLayer(b, ':popover-open');
+    const login = fieldAt(a, 10, 10);
+    const signup = fieldAt(b, 10, 300);
+    (document as any).elementFromPoint = (_x: number, y: number) => (y < 100 ? login : signup);
+    (document as any).elementsFromPoint = (_x: number, y: number) => [y < 100 ? login : signup];
+    const { ov, host, gen } = overlayWithRoot();
+    const moves = vi.fn();
+    for (let i = 0; i < 3; i++) { // three scans
+      ov.showIcon(login, () => {});
+      const parent = host.parentElement;
+      ov.showGeneratorIcon(signup, () => {});
+      if (host.parentElement !== parent) moves();
+    }
+    expect(host.parentElement).toBe(a);
+    expect(moves).not.toHaveBeenCalled();
+    expect(gen.style.display).toBe('none');
+    ov.destroy();
+  });
+
+  it('undoes the scale of a scaled top-layer element', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    markTopLayer(dialog, ':modal');
+    // transform: scale(2): laid out 200x150, drawn 400x300.
+    Object.defineProperty(dialog, 'offsetWidth', { value: 200 });
+    Object.defineProperty(dialog, 'offsetHeight', { value: 150 });
+    stubRect(dialog, { left: 100, top: 50, width: 400, height: 300, right: 500, bottom: 350 });
+    const anchor = fieldAt(dialog, 300, 176); // bottom edge at 200
+    const { ov, host, list } = overlayWithRoot();
+    stubRect(host, { left: 100, top: 50, width: 0, height: 0, right: 100, bottom: 50 });
+    ov.showMatches(anchor, [{ id: 'a', title: 'A' }], () => {});
+    expect(host.parentElement).toBe(dialog);
+    expect(list.style.left).toBe('100px'); // (300 - 100) / 2
+    expect(list.style.top).toBe('75px');   // (200 - 50) / 2
+    ov.destroy();
+  });
+
+  it('keeps a list that fits at its anchor', () => {
+    document.body.innerHTML = '';
+    const anchor = fieldAt(document.body, 10, 10);
+    const { ov, list } = overlayWithRoot();
+    listFollowsStyle(list);
+    ov.showMatches(anchor, [{ id: 'a', title: 'A' }], () => {});
+    expect(list.style.left).toBe('10px');
+    expect(list.style.top).toBe('34px');
+    ov.destroy();
+  });
+
+  it('shifts the list left off the right edge and above a field near the bottom', () => {
+    document.body.innerHTML = '';
+    const vw = window.innerWidth;   // 1024 in jsdom
+    const vh = window.innerHeight;  // 768 in jsdom
+    const anchor = fieldAt(document.body, vw - 124, vh - 68); // bottom at vh - 44
+    const { ov, list } = overlayWithRoot();
+    listFollowsStyle(list);
+    ov.showMatches(anchor, [{ id: 'a', title: 'A' }], () => {});
+    expect(parseFloat(list.style.left) + 240).toBe(vw - 4);
+    // Opened above: its drawn bottom sits 4px over the field's top.
+    expect(parseFloat(list.style.top) + 4 + 100).toBe(vh - 68 - 4);
+    ov.destroy();
+  });
+});
+
 describe('overlay host in the top layer', () => {
   function hostOf(): HTMLElement | undefined {
     return Array.from(document.querySelectorAll('div'))
@@ -470,6 +562,15 @@ describe('overlayHostIntact', () => {
     expect(overlayHostIntact(hostIn(document.querySelector('section')!))).toBe(false);
   });
 
+  it('stops at the top-layer element: effects on its ancestors do not reach it', () => {
+    document.body.innerHTML = '<div style="opacity: 0.5; filter: blur(4px)"><dialog></dialog></div>';
+    const dialog = document.querySelector('dialog')!;
+    markTopLayer(dialog, ':modal');
+    expect(overlayHostIntact(hostIn(dialog))).toBe(true);
+    dialog.style.filter = 'blur(4px)'; // on the top-layer element itself
+    expect(overlayHostIntact(hostIn(dialog))).toBe(false);
+  });
+
   it('rejects a host that is not in the document', () => {
     expect(overlayHostIntact(document.createElement('div'))).toBe(false);
   });
@@ -558,10 +659,28 @@ describe('activation guard', () => {
     ov.showIcon(field, onIcon);
     env.t += 400;
     field.getBoundingClientRect = () => ({ left: 10, top: 60, width: 200, height: 24, right: 210, bottom: 84, x: 10, y: 60, toJSON() {} }) as DOMRect;
+    stubRect(icon, { left: 186, top: 62, width: 20, height: 20, right: 206, bottom: 82 });
     ov.showIcon(field, onIcon); // moved under the pointer
     env.t += 50;
-    press(icon);
+    press(icon, 196, 72);
     expect(onIcon).not.toHaveBeenCalled();
+    ov.destroy();
+  });
+
+  it('restarts the dwell when the icon moves on screen without being re-placed', () => {
+    // A page shifting the top-layer element that holds the host moves the icon
+    // with it; no scan runs and the host-local position stays the same.
+    document.body.innerHTML = '';
+    const { field, ov, icon, env } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    ov.showIcon(field, onIcon);
+    env.t += 400;
+    stubRect(icon, { left: 286, top: 112, width: 20, height: 20, right: 306, bottom: 132 });
+    press(icon, 296, 122);
+    expect(onIcon).not.toHaveBeenCalled();
+    env.t += 400;
+    press(icon, 296, 122);
+    expect(onIcon).toHaveBeenCalledTimes(1);
     ov.destroy();
   });
 
@@ -602,7 +721,7 @@ describe('activation guard', () => {
     ov.showIcon(field, onIcon);
     ov.showMatches(field, [{ id: 'a', title: 'A' }], vi.fn());
     env.t += 400;
-    stubRect(icon, { left: 190, top: 16, width: 10, height: 10, right: 200, bottom: 26 }); // transform: scale(0.5)
+    stubRect(icon, { left: 186, top: 12, width: 10, height: 10, right: 196, bottom: 22 }); // transform: scale(0.5), origin top left
     press(icon);
     expect(onIcon).not.toHaveBeenCalled();
     expect(list.style.display).toBe('none');
