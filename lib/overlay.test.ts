@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, topLayerAncestor, type OverlayMatch } from './overlay';
+import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, topLayerAncestor, overlayHostIntact, type OverlayMatch } from './overlay';
 
 function stubRect(el: Element, rect: Partial<DOMRect>): void {
   (el as any).getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 30, right: 100, bottom: 30, x: 0, y: 0, toJSON() {}, ...rect });
@@ -392,6 +392,97 @@ describe('overlay host in the top layer', () => {
     const ov = createOverlay(document);
     ov.showIcon(field, () => {});
     expect(hostOf()!.parentElement).toBe(document.documentElement);
+    ov.destroy();
+  });
+});
+
+describe('overlayHostIntact', () => {
+  function hostIn(container: Element): HTMLElement {
+    const host = document.createElement('div');
+    container.appendChild(host);
+    return host;
+  }
+
+  it('passes for a host with nothing above it faded, filtered or clipped', () => {
+    document.body.innerHTML = '';
+    const host = hostIn(document.documentElement);
+    expect(overlayHostIntact(host)).toBe(true);
+    host.remove();
+  });
+
+  it('rejects a host inside a dialog the page made transparent', () => {
+    document.body.innerHTML = '<dialog style="opacity: 0.5"></dialog>';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+  });
+
+  it('rejects when opacities along the chain multiply below the threshold', () => {
+    // 0.95 * 0.9 = 0.855: each alone would pass.
+    document.body.innerHTML = '<div style="opacity: 0.95"><dialog style="opacity: 0.9"></dialog></div>';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+  });
+
+  it('rejects a filter on an ancestor', () => {
+    document.body.innerHTML = '<dialog style="filter: opacity(0)"></dialog>';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+  });
+
+  it('rejects clip-path and blend modes on an ancestor', () => {
+    document.body.innerHTML = '<div popover style="clip-path: inset(50%)"></div><dialog style="mix-blend-mode: multiply"></dialog>';
+    expect(overlayHostIntact(hostIn(document.querySelector('[popover]')!))).toBe(false);
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+  });
+
+  it('rejects a host that is not in the document', () => {
+    expect(overlayHostIntact(document.createElement('div'))).toBe(false);
+  });
+});
+
+describe('activation guard', () => {
+  // The shadow root is closed; capture it at creation to press the icon and a row.
+  function openOverlay(container: Element) {
+    const field = document.createElement('input');
+    field.type = 'password';
+    field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
+    container.appendChild(field);
+    (document as any).elementFromPoint = () => field; (document as any).elementsFromPoint = () => [field];
+    const spy = vi.spyOn(Element.prototype, 'attachShadow');
+    const ov = createOverlay(document);
+    const root = spy.mock.results[0]!.value as ShadowRoot;
+    spy.mockRestore();
+    return { field, ov, root };
+  }
+
+  it('lets an icon click and a pick through when the host is plainly visible', () => {
+    document.body.innerHTML = '';
+    const { field, ov, root } = openOverlay(document.body);
+    const onIcon = vi.fn();
+    const onPick = vi.fn();
+    ov.showIcon(field, onIcon);
+    (root.querySelector('.kokos-icon') as HTMLElement).click();
+    expect(onIcon).toHaveBeenCalledTimes(1);
+    ov.showMatches(field, [{ id: 'a', title: 'A' }], onPick);
+    (root.querySelector('.kokos-row') as HTMLElement).click();
+    expect(onPick).toHaveBeenCalledTimes(1);
+    ov.destroy();
+  });
+
+  it('drops the icon click and the pick, and closes the list, under a faded dialog', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    const { field, ov, root } = openOverlay(dialog);
+    // Mount the host inside the dialog, as for a showModal() dialog.
+    const base = Element.prototype.matches;
+    (dialog as any).matches = function (sel: string) { return sel === ':modal' ? true : base.call(this, sel); };
+    const onIcon = vi.fn();
+    const onPick = vi.fn();
+    ov.showIcon(field, onIcon);
+    ov.showMatches(field, [{ id: 'a', title: 'A' }], onPick);
+    dialog.style.opacity = '0.01';
+    (root.querySelector('.kokos-icon') as HTMLElement).click();
+    (root.querySelector('.kokos-row') as HTMLElement).click();
+    expect(onIcon).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+    expect((root.querySelector('.kokos-list') as HTMLElement).style.display).toBe('none');
     ov.destroy();
   });
 });
