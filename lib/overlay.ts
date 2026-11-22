@@ -45,6 +45,9 @@ function svgIcon(doc: Document, paths: string[]): SVGSVGElement {
 // at a sane column, and `overflow-wrap: anywhere` replaces the previous
 // `word-break: break-all`, which split ordinary words mid-letter while still
 // being needed for an unspaced generated password.
+// No filter, opacity or scale on hover/press: IntersectionObserver v2 reports
+// an element drawn with any of those as not visible, and the activation guard
+// would then refuse the very click the user is making.
 const OVERLAY_CSS = `
 .kokos-ui {
   --bg: oklch(0.205 0.014 60); --bg-hover: oklch(1 0 0 / 0.06); --text-1: oklch(0.93 0.006 65);
@@ -65,9 +68,8 @@ const OVERLAY_CSS = `
 .kokos-icon, .kokos-gen { position: absolute; width: ${ICON_SIZE}px; height: ${ICON_SIZE}px; padding: 0; margin: 0;
   display: grid; place-items: center; border: none; border-radius: 6px; cursor: pointer; color: var(--on-accent);
   background: linear-gradient(180deg, var(--accent), var(--accent-deep));
-  box-shadow: 0 1px 3px oklch(0 0 0 / 0.25), inset 0 1px 0 oklch(1 0 0 / 0.2); transition: filter .15s ease, transform .1s ease; }
-.kokos-icon:hover, .kokos-gen:hover { filter: brightness(1.1); }
-.kokos-icon:active, .kokos-gen:active { transform: scale(0.94); }
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.25), inset 0 1px 0 oklch(1 0 0 / 0.2); transition: background .15s ease; }
+.kokos-icon:hover, .kokos-gen:hover { background: linear-gradient(180deg, var(--accent-deep), var(--accent-deep)); }
 .kokos-icon svg, .kokos-gen svg { width: 12px; height: 12px; display: block; }
 .kokos-list { position: absolute; min-width: 240px; max-width: 320px; max-height: 260px; overflow-y: auto; margin-top: 4px; padding: 4px;
   background: var(--bg); border-radius: 11px; box-shadow: inset 0 0 0 1px var(--line), var(--shadow); }
@@ -227,12 +229,38 @@ export function overlayHostIntact(host: Element): boolean {
     const o = parseFloat(cs.opacity);
     if (!Number.isNaN(o)) opacity *= o;
     if (el === doc.documentElement || el === doc.body) continue;
+    // Masks are read through their longhands: how the `mask` shorthand is
+    // serialized differs between engines, and every mask needs an image.
     if (changed(cs.getPropertyValue('filter'), 'none')
       || changed(cs.getPropertyValue('backdrop-filter'), 'none')
       || changed(cs.getPropertyValue('clip-path'), 'none')
-      || changed(cs.getPropertyValue('mix-blend-mode'), 'normal')) return false;
+      || changed(cs.getPropertyValue('mix-blend-mode'), 'normal')
+      || changed(cs.getPropertyValue('mask-image'), 'none')
+      || changed(cs.getPropertyValue('-webkit-mask-image'), 'none')
+      || changed(cs.getPropertyValue('-webkit-mask-box-image-source'), 'none')
+      || cs.getPropertyValue('content-visibility') === 'hidden') return false;
   }
   return opacity >= MIN_OPACITY;
+}
+
+// The size a control is drawn at must stay close to its CSS size: a scaled
+// (transform, zoom, perspective) icon or row is shrunk to make it hard to see.
+const MIN_RENDERED = 0.8;
+// The smallest box a match row is laid out at (list min-width minus padding,
+// monogram plus padding).
+const ROW_MIN_WIDTH = 232;
+const ROW_MIN_HEIGHT = 38;
+
+export function drawnFullSize(el: Element, width: number, height: number): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width >= width * MIN_RENDERED && r.height >= height * MIN_RENDERED;
+}
+
+export function insideViewport(el: Element, view: Window): boolean {
+  const r = el.getBoundingClientRect();
+  const vw = view.innerWidth || el.ownerDocument.documentElement.clientWidth;
+  const vh = view.innerHeight || el.ownerDocument.documentElement.clientHeight;
+  return r.left >= -1 && r.top >= -1 && r.right <= vw + 1 && r.bottom <= vh + 1;
 }
 
 export function renderMatches(container: HTMLElement | ShadowRoot, matches: OverlayMatch[], onPick: (m: OverlayMatch) => void): void {
@@ -285,8 +313,21 @@ export interface OverlayController {
   destroy(): void;
 }
 
-export function createOverlay(doc: Document = document): OverlayController {
+// Activation timing: a control must have stood still this long before a
+// click on it counts, and a click must follow its pointerdown within PAIR_MS.
+const DWELL_MS = 300;
+const PAIR_MS = 2000;
+
+export interface OverlayOptions {
+  // Injected by tests only: jsdom cannot produce trusted events or a clock to step.
+  isTrusted?: (e: Event) => boolean;
+  now?: () => number;
+}
+
+export function createOverlay(doc: Document = document, opts: OverlayOptions = {}): OverlayController {
   const view = doc.defaultView!;
+  const isTrusted = opts.isTrusted ?? ((e: Event) => e.isTrusted);
+  const now = opts.now ?? (() => Date.now());
   const host = doc.createElement('div');
   const HOST_CSS = 'top:0;left:0;width:0;height:0;margin:0;padding:0;border:0;z-index:2147483647;';
   host.style.cssText = `position:absolute;${HOST_CSS}`;
@@ -356,29 +397,97 @@ export function createOverlay(doc: Document = document): OverlayController {
     return { left: x - o.left, top: y - o.top };
   };
 
-  // A click (or Enter/Space on the focused button) only counts while the host
-  // is plainly visible; otherwise it is dropped and the list closed.
-  const activationOk = (): boolean => {
-    if (overlayHostIntact(host)) return true;
-    list.style.display = 'none';
-    return false;
+  // Activation guard against DOM-based clickjacking: a page that fades,
+  // disguises, shrinks or covers the icon or the list, or moves it under the
+  // pointer at the last moment, to steer the user into a fill click.
+  //
+  // - Only trusted events count.
+  // - A pointer click counts only after a pointerdown on the same control that
+  //   passed the same checks, so styles changed between press and release are
+  //   caught too. A keyboard click (detail 0, on the focused button) has no
+  //   pointerdown and no point to test.
+  // - Dwell: the control must not have been shown or moved within DWELL_MS.
+  // - The host chain must be plainly visible (overlayHostIntact), the control
+  //   drawn at close to its CSS size and inside the viewport.
+  // - Occlusion: where IntersectionObserver v2 exists (Chrome), its last
+  //   isVisible verdict for the control must not be false. Everywhere, the
+  //   topmost element at the pointer must be our host. Only IOv2 catches a
+  //   decoy drawn over the icon with pointer-events: none, which the point
+  //   test sees through.
+  //
+  // A failure from waiting (dwell, pairing) just drops the click; any other
+  // failure also closes the list.
+  type Verdict = 'ok' | 'wait' | 'tamper';
+  const shownAt = new Map<Element, number>();
+  const ioVisible = new Map<Element, boolean>();
+  const IO = (view as Window & { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+  const Entry = (view as Window & { IntersectionObserverEntry?: { prototype: object } }).IntersectionObserverEntry;
+  const io = IO && Entry && 'isVisible' in Entry.prototype
+    ? new IO((entries) => {
+      for (const en of entries) ioVisible.set(en.target, (en as IntersectionObserverEntry & { isVisible?: boolean }).isVisible !== false);
+    }, { trackVisibility: true, delay: 100 } as IntersectionObserverInit)
+    : null;
+  // IOv2 reports any filter on an ancestor as not visible, so a page-wide
+  // filter on <html> or <body> (dark-mode extensions, site-wide grayscale)
+  // would block every fill; the point test still runs there.
+  const pageFiltered = (): boolean => [doc.documentElement, doc.body].some((el) => {
+    if (!el) return false;
+    const f = view.getComputedStyle(el).getPropertyValue('filter');
+    return f !== '' && f !== 'none';
+  });
+  const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
+    if (!isTrusted(e)) return 'tamper';
+    if (now() - (shownAt.get(ioTarget) ?? -Infinity) < DWELL_MS) return 'wait';
+    if (!overlayHostIntact(host)) return 'tamper';
+    if (!drawnFullSize(control, w, h)) return 'tamper';
+    // A row cut off by the viewport edge is ordinary; scroll and click again.
+    if (!insideViewport(control, view)) return 'wait';
+    if (ioVisible.get(ioTarget) === false && !pageFiltered()) return 'tamper';
+    const keyboard = e.type === 'click' && e.detail === 0;
+    if (keyboard) return root.activeElement === control ? 'ok' : 'tamper';
+    if (typeof doc.elementsFromPoint === 'function' && doc.elementsFromPoint(e.clientX, e.clientY)[0] !== host) return 'tamper';
+    return 'ok';
+  };
+  let armed: { control: Element; at: number } | null = null;
+  // Wires the guard onto one control; `act` runs only for a click that passed.
+  const guard = (control: HTMLElement, ioTarget: Element, w: number, h: number, act: () => void) => {
+    control.addEventListener('pointerdown', (e) => {
+      const v = verdict(e as MouseEvent, control, ioTarget, w, h);
+      armed = v === 'ok' ? { control, at: now() } : null;
+      if (v === 'tamper') list.style.display = 'none';
+    });
+    control.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const keyboard = e.detail === 0;
+      const paired = keyboard || (armed !== null && armed.control === control && now() - armed.at <= PAIR_MS);
+      armed = null;
+      if (!paired) return;
+      const v = verdict(e, control, ioTarget, w, h);
+      if (v === 'ok') act();
+      else if (v === 'tamper') list.style.display = 'none';
+    });
+  };
+  // Records when a control was shown or moved, for the dwell check.
+  const placed = (el: HTMLElement, left: string, top: string) => {
+    const moved = el.style.display === 'none'
+      || Math.abs(parseFloat(el.style.left) - parseFloat(left)) > 2
+      || Math.abs(parseFloat(el.style.top) - parseFloat(top)) > 2
+      || Number.isNaN(parseFloat(el.style.left));
+    if (moved) shownAt.set(el, now());
+    el.style.left = left;
+    el.style.top = top;
   };
 
   let iconHandler: (() => void) | null = null;
-  icon.addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (activationOk()) iconHandler?.();
-  });
+  guard(icon, icon, ICON_SIZE, ICON_SIZE, () => iconHandler?.());
 
   // Held so a second showToast (or an explicit hideToast) cancels the first
   // one's pending auto-hide instead of letting it blank the newer message.
   let toastTimer: ReturnType<Window['setTimeout']> | null = null;
 
   let genHandler: (() => void) | null = null;
-  gen.addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (activationOk()) genHandler?.();
-  });
+  guard(gen, gen, ICON_SIZE, ICON_SIZE, () => genHandler?.());
+  if (io) { io.observe(icon); io.observe(gen); io.observe(list); }
 
   return {
     showIcon(field, onIconClick) {
@@ -386,18 +495,23 @@ export function createOverlay(doc: Document = document): OverlayController {
       attach(field);
       const p = positionFor(field.getBoundingClientRect(), 0, 0);
       const q = at(iconLeftAvoiding(field, doc, host), p.top);
-      icon.style.left = `${q.left}px`;
-      icon.style.top = `${q.top}px`;
+      placed(icon, `${q.left}px`, `${q.top}px`);
       icon.style.display = 'grid';
       iconHandler = onIconClick;
     },
     showMatches(anchor, matches, onPick) {
       attach(anchor);
-      renderMatches(list, matches, (m) => { if (activationOk()) onPick(m); });
+      renderMatches(list, matches, () => {});
+      // Rows are wired through the guard instead of renderMatches' own click.
+      list.querySelectorAll<HTMLElement>('.kokos-row').forEach((row, i) => {
+        const m = matches[i]!;
+        guard(row, list, ROW_MIN_WIDTH, ROW_MIN_HEIGHT, () => onPick(m));
+      });
       const rect = anchor.getBoundingClientRect();
       const q = at(rect.left, rect.bottom);
       list.style.left = `${q.left}px`;
       list.style.top = `${q.top}px`;
+      shownAt.set(list, now()); // a freshly opened list always waits out the dwell
       list.style.display = 'block';
     },
     showGeneratorIcon(field, onClick) {
@@ -405,8 +519,7 @@ export function createOverlay(doc: Document = document): OverlayController {
       attach(field);
       const p = positionFor(field.getBoundingClientRect(), 0, 0);
       const q = at(iconLeftAvoiding(field, doc, host), p.top);
-      gen.style.left = `${q.left}px`;
-      gen.style.top = `${q.top}px`;
+      placed(gen, `${q.left}px`, `${q.top}px`);
       gen.style.display = 'grid';
       genHandler = onClick;
     },
@@ -437,6 +550,6 @@ export function createOverlay(doc: Document = document): OverlayController {
     },
     hideToast() { toast.style.display = 'none'; toast.textContent = ''; },
     hide() { icon.style.display = 'none'; list.style.display = 'none'; },
-    destroy() { destroyed = true; host.remove(); },
+    destroy() { destroyed = true; io?.disconnect(); host.remove(); },
   };
 }
