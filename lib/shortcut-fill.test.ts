@@ -27,6 +27,14 @@ describe('routeShortcutFill', () => {
     expect(out).toBe('filled-dispatch');
   });
 
+  it('reports an error when the content script says it could not fill', async () => {
+    const request = vi.fn(async () => ok({ items: [{ id: '1', title: 'A', username: 'alice' }] }));
+    for (const res of [{ ok: false, reason: 'no-form' }, { ok: false, reason: 'error' }, undefined] as const) {
+      const out = await routeShortcutFill(7, makeDeps({ request, dispatchFill: vi.fn(async () => res) }));
+      expect(out).toBe('error');
+    }
+  });
+
   it('on a locked app asks to unlock, then looks up again and fills', async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(fail('locked'))

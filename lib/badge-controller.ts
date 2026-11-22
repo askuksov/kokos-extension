@@ -3,21 +3,11 @@
 // testable — mirrors picker-bridge.ts. The url is browser-derived by the caller.
 import { mapErrCode, type Probe } from './badge-status';
 import type { NmhResponse, GetLoginsResult, GetStatusResult } from './nmh-client';
+import { httpOrigin } from './url';
 
 export interface BadgeDeps {
   request(origin: string, action: string, payload: object): Promise<NmhResponse>;
   isEnabled(url: string): Promise<boolean>;
-}
-
-function httpOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return u.origin;
-  } catch {
-    return null;
-  }
 }
 
 /** null = not a fillable http(s) page (caller clears the badge). Otherwise the
