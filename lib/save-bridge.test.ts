@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { routeSaveMessage, type SaveBridgeDeps, type Pending } from './save-bridge';
+import { routeSaveMessage, sweepExpiredPending, PENDING_TTL_MS, type SaveBridgeDeps, type Pending } from './save-bridge';
 import { newGateState } from './save-prompt-gate';
 import type { NmhResponse } from './nmh-client';
 
@@ -363,5 +363,81 @@ describe('unlock-and-save', () => {
   it('answers without a pending capture', async () => {
     const res = await routeSaveMessage({ type: 'unlock-and-save', tabId: 7 }, popupSender, makeDeps({ unlock: vi.fn() })) as NmhResponse;
     expect(res.error?.code).toBe('bad_request');
+  });
+});
+
+describe('pending lifecycle', () => {
+  const capture = (password: string) => ({ type: 'save-capture', username: 'alice', password });
+
+  it('a capture that replaces the one being committed survives the commit', async () => {
+    let release!: (r: NmhResponse) => void;
+    const request = vi.fn((_o: string, action: string) =>
+      action === 'get_logins' ? new Promise<NmhResponse>((r) => { release = r; }) : Promise.resolve(ok({ entry_id: 'e' })));
+    let n = 0;
+    const deps = makeDeps({ request, newToken: () => `tok${++n}` });
+    await routeSaveMessage(capture('A'), csSender, deps);
+    const committing = routeSaveMessage({ type: 'commit-pending-save', tabId: 7, token: 'tok1' }, popupSender, deps);
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+
+    await routeSaveMessage(capture('B'), csSender, deps);
+    (deps.setBadge as any).mockClear();
+    release(ok({ items: [] }));
+    expect(await committing).toMatchObject({ ok: true });
+    expect(deps.pending.get(7)?.password).toBe('B');
+    expect(deps.setBadge).not.toHaveBeenCalledWith(7, false);
+  });
+
+  it('never-save-here keeps a capture that replaced it while the ignore was written', async () => {
+    let release!: () => void;
+    const deps = makeDeps({ addSaveIgnore: vi.fn(() => new Promise<void>((r) => { release = r; })) });
+    deps.pending.set(7, { token: 'old', username: 'alice', password: 'A', url: 'https://a.com/x', origin: 'https://a.com', ts: 1000 });
+    const nevering = routeSaveMessage({ type: 'never-save-here', tabId: 7 }, popupSender, deps);
+    await vi.waitFor(() => expect(deps.addSaveIgnore).toHaveBeenCalled());
+    deps.pending.set(7, { token: 'new', username: 'alice', password: 'B', url: 'https://a.com/x', origin: 'https://a.com', ts: 1000 });
+    release();
+    await nevering;
+    expect(deps.pending.get(7)?.token).toBe('new');
+    expect(deps.setBadge).not.toHaveBeenCalledWith(7, false);
+  });
+
+  it('after expiry the same credentials are captured and badged again', async () => {
+    let t = 1000;
+    const deps = makeDeps({ now: () => t });
+    await routeSaveMessage(capture('pw'), csSender, deps);
+    t += PENDING_TTL_MS + 1;
+    (deps.setBadge as any).mockClear();
+    expect(await routeSaveMessage(capture('pw'), csSender, deps)).toEqual({ ok: true });
+    expect(deps.pending.get(7)).toMatchObject({ password: 'pw', ts: t });
+    expect(deps.setBadge).toHaveBeenCalledWith(7, true);
+  });
+
+  it('the sweep drops an idle expired capture and its badge, and keeps a fresh one', async () => {
+    let t = 1000;
+    const scheduleSweep = vi.fn();
+    const deps = makeDeps({ now: () => t, scheduleSweep });
+    await routeSaveMessage(capture('pw'), csSender, deps);
+    expect(scheduleSweep).toHaveBeenCalledWith(expect.any(Number));
+    expect(scheduleSweep.mock.calls[0]![0]).toBeGreaterThan(PENDING_TTL_MS);
+
+    sweepExpiredPending(deps);
+    expect(deps.pending.has(7)).toBe(true);
+
+    t += PENDING_TTL_MS + 1;
+    sweepExpiredPending(deps);
+    expect(deps.pending.has(7)).toBe(false);
+    expect(deps.setBadge).toHaveBeenCalledWith(7, false);
+  });
+
+  it('expiry keeps the record of a newer capture of the same login', async () => {
+    let t = 1000;
+    const deps = makeDeps({ now: () => t });
+    await routeSaveMessage(capture('A'), csSender, deps);
+    t += 60_000;
+    await routeSaveMessage(capture('B'), { ...csSender, tab: { id: 8 } }, deps);
+    t += 60_001; // tab 7 expired, tab 8 still live
+    sweepExpiredPending(deps);
+    expect(deps.pending.has(7)).toBe(false);
+    // B is still on offer in tab 8, so a repeat of B elsewhere stays quiet.
+    expect(await routeSaveMessage(capture('B'), { ...csSender, tab: { id: 9 } }, deps)).toEqual({ ok: false });
   });
 });

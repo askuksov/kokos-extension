@@ -7,7 +7,7 @@ import { computeProbe, isSettleUpdate, type BadgeDeps } from '../lib/badge-contr
 
 const SAVE_DOT = '#c0392b'; // red corner dot = a login is pending save on this tab
 import { initSiteAccess, isEnabled, originPattern } from '../lib/site-access';
-import { routeSaveMessage, type SaveBridgeDeps, type Pending } from '../lib/save-bridge';
+import { routeSaveMessage, sweepExpiredPending, type SaveBridgeDeps, type Pending } from '../lib/save-bridge';
 import { newGateState } from '../lib/save-prompt-gate';
 import { isSaveIgnored, addSaveIgnore } from '../lib/save-ignore';
 import { routePickerMessage, type PickerBridgeDeps } from '../lib/picker-bridge';
@@ -176,6 +176,8 @@ export default defineBackground(() => {
       promptedAt.set(tabId, Date.now());
       void promptSave(tabId, promptDeps);
     },
+    // A worker that sleeps first drops the in-memory captures anyway.
+    scheduleSweep: (delayMs) => { setTimeout(() => sweepExpiredPending(saveDeps), delayMs); },
     unlock: (url) => requestUnlock(url, true, unlockDeps),
     now: () => Date.now(),
     newToken: () =>
@@ -222,7 +224,7 @@ export default defineBackground(() => {
 
   // Bound a held capture without any new permission: clear on tab close and on a
   // best-effort origin change (changeInfo.url is delivered for a tab we hold host
-  // permission for). Read-time TTL + token supersession bound it otherwise.
+  // permission for). The TTL sweep + token supersession bound it otherwise.
   chrome.tabs.onRemoved.addListener((tabId) => {
     pending.delete(tabId);
     promptedAt.delete(tabId);
