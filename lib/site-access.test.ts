@@ -158,3 +158,51 @@ describe('initSiteAccess onAdded', () => {
     expect(onEnabled).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('serialized list changes', () => {
+  // A slow storage read makes unserialized read-modify-write cycles overlap.
+  function slowReads() {
+    const get = chrome.storage.local.get as any;
+    const orig = get.getMockImplementation()!;
+    get.mockImplementation(async (k: string) => {
+      const value = await orig(k);
+      await new Promise((r) => setTimeout(r, 5));
+      return value;
+    });
+  }
+
+  it('keeps every origin when enables overlap', async () => {
+    installFakeChrome(true);
+    slowReads();
+    await Promise.all([
+      enableSite('https://a.com/'),
+      enableSite('https://b.com/'),
+      enableSite('https://c.com/'),
+    ]);
+    expect((await listEnabledSites()).sort()).toEqual(['https://a.com', 'https://b.com', 'https://c.com']);
+  });
+
+  it('keeps a concurrent enable when a disable and a permission removal overlap', async () => {
+    installFakeChrome(true);
+    await enableSite('https://a.com/');
+    await enableSite('https://b.com/');
+    initSiteAccess();
+    await new Promise((r) => setTimeout(r, 0)); // let the startup reconcile finish before slowing reads
+    slowReads();
+    const onRemoved = (chrome.permissions.onRemoved.addListener as any).mock.calls[0][0];
+    await Promise.all([
+      disableSite('https://a.com/'),
+      enableSite('https://c.com/'),
+      onRemoved({ origins: ['https://b.com/*'] }),
+    ]);
+    await vi.waitFor(async () => expect(await listEnabledSites()).toEqual(['https://c.com']));
+  });
+
+  it('a failed change does not block later ones', async () => {
+    installFakeChrome(true);
+    (chrome.storage.local.set as any).mockRejectedValueOnce(new Error('quota'));
+    await expect(enableSite('https://a.com/')).rejects.toThrow('quota');
+    await enableSite('https://b.com/');
+    expect(await listEnabledSites()).toEqual(['https://b.com']);
+  });
+});

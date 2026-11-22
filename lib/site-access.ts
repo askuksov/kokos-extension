@@ -34,6 +34,19 @@ async function setList(list: string[]): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: [...new Set(list)] });
 }
 
+// Every list change is a read, an await and a write. Overlapping changes (two
+// grants at once, onRemoved or reconcile during an enable) would both read the
+// same list and the second write would drop the first one's origin. All
+// changes go through this one promise chain instead. Slow work (permission
+// prompts, script registration) stays outside it.
+let listQueue: Promise<unknown> = Promise.resolve();
+
+function updateList(change: (list: string[]) => string[]): Promise<void> {
+  const run = listQueue.then(async () => setList(change(await getList())));
+  listQueue = run.catch(() => { /* a failed change must not block later ones */ });
+  return run;
+}
+
 async function registerFor(pattern: string): Promise<void> {
   const id = CS_ID_PREFIX + pattern;
   try { await chrome.scripting.unregisterContentScripts({ ids: [id] }); } catch { /* not registered yet */ }
@@ -63,14 +76,14 @@ export async function enableSite(url: string): Promise<boolean> {
   const granted = await chrome.permissions.request({ origins: [pattern] });
   if (!granted) return false;
   await registerFor(pattern);
-  await setList([...(await getList()), canonicalOrigin(url)]);
+  await updateList((list) => [...list, canonicalOrigin(url)]);
   return true;
 }
 
 export async function disableSite(url: string): Promise<void> {
   const pattern = originPattern(url);
   await unregisterFor(pattern);
-  await setList((await getList()).filter((o) => o !== canonicalOrigin(url)));
+  await updateList((list) => list.filter((o) => o !== canonicalOrigin(url)));
   try { await chrome.permissions.remove({ origins: [pattern] }); } catch { /* ignore */ }
 }
 
@@ -91,7 +104,7 @@ export async function onOriginsAdded(patterns: string[]): Promise<string[]> {
     const origin = siteOriginOf(pattern);
     if (!origin) continue;
     await registerFor(`${origin}/*`);
-    await setList([...(await getList()), origin]);
+    await updateList((list) => [...list, origin]);
     enabled.push(origin);
   }
   return enabled;
@@ -109,7 +122,7 @@ export async function reconcile(): Promise<void> {
   for (const origin of await getList()) {
     const pattern = `${origin}/*`;
     if (await chrome.permissions.contains({ origins: [pattern] })) await registerFor(pattern);
-    else await setList((await getList()).filter((o) => o !== origin));
+    else await updateList((list) => list.filter((o) => o !== origin));
   }
   // A grant whose onAdded was missed (e.g. the worker died mid-enable) is
   // finished here on the next start.
@@ -136,7 +149,7 @@ export function initSiteAccess(onEnabled?: (origins: string[]) => void): void {
       for (const pattern of origins) {
         await unregisterFor(pattern);
         const origin = pattern.replace(/\/\*$/, '');
-        await setList((await getList()).filter((o) => o !== origin));
+        await updateList((list) => list.filter((o) => o !== origin));
       }
     })();
   });
