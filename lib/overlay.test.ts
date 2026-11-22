@@ -580,12 +580,14 @@ describe('activation guard', () => {
   // The shadow root is closed; capture it at creation to press the icon and a
   // row. jsdom events are never trusted and its clock does not step, so both
   // are injected.
+  let clock = { t: 0, trusted: true };
   function openOverlay(container: Element) {
     const field = document.createElement('input');
     field.type = 'password';
     field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
     container.appendChild(field);
     const env = { t: 1000, trusted: true };
+    clock = env;
     const spy = vi.spyOn(Element.prototype, 'attachShadow');
     const ov = createOverlay(document, { now: () => env.t, isTrusted: () => env.trusted });
     const root = spy.mock.results[0]!.value as ShadowRoot;
@@ -604,9 +606,22 @@ describe('activation guard', () => {
     const list = root.querySelector('.kokos-list') as HTMLElement;
     return { field, ov, root, host, icon, list, rowAt, env };
   }
+  // The pointer entered `el` `ms` ago (by default long enough for the hover dwell).
+  function hoverFor(el: HTMLElement, ms = 300, pointerType = 'mouse') {
+    const t = clock.t;
+    clock.t = t - ms;
+    el.dispatchEvent(pointer('pointerover', 196, 22, pointerType));
+    clock.t = t;
+  }
+  function pointer(type: string, x: number, y: number, pointerType = 'mouse'): MouseEvent {
+    const e = new MouseEvent(type, { clientX: x, clientY: y, detail: 1, bubbles: true, cancelable: true });
+    Object.defineProperty(e, 'pointerType', { value: pointerType });
+    return e;
+  }
   function press(el: HTMLElement, x = 196, y = 22) {
-    el.dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, detail: 1, bubbles: true }));
-    el.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, detail: 1, bubbles: true, cancelable: true }));
+    hoverFor(el);
+    el.dispatchEvent(pointer('pointerdown', x, y));
+    el.dispatchEvent(pointer('click', x, y));
   }
 
   it('lets an icon click and a pick through once they have stood still', () => {
@@ -684,6 +699,80 @@ describe('activation guard', () => {
     ov.destroy();
   });
 
+  describe('hover dwell', () => {
+    function shown() {
+      document.body.innerHTML = '';
+      const o = openOverlay(document.body);
+      const onIcon = vi.fn();
+      o.ov.showIcon(o.field, onIcon);
+      o.env.t += 400; // past the show dwell
+      return { ...o, onIcon };
+    }
+    function downAndClick(el: HTMLElement, pointerType = 'mouse') {
+      el.dispatchEvent(pointer('pointerdown', 196, 22, pointerType));
+      el.dispatchEvent(pointer('click', 196, 22, pointerType));
+    }
+
+    it('drops a mouse press right after the pointer arrived', () => {
+      const { ov, icon, onIcon } = shown();
+      hoverFor(icon, 50); // the icon appeared under a resting cursor
+      downAndClick(icon);
+      expect(onIcon).not.toHaveBeenCalled();
+      ov.destroy();
+    });
+
+    it('accepts a mouse press after the pointer rested on the icon for the dwell', () => {
+      const { ov, icon, onIcon } = shown();
+      hoverFor(icon, 300);
+      downAndClick(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('restarts the hover when the pointer leaves', () => {
+      const { ov, icon, env, onIcon } = shown();
+      hoverFor(icon, 300);
+      icon.dispatchEvent(pointer('pointerleave', 0, 0));
+      hoverFor(icon, 50);
+      downAndClick(icon);
+      expect(onIcon).not.toHaveBeenCalled();
+      env.t += 300;
+      downAndClick(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('does not count hovering while the overlay was faded out', () => {
+      // A page keeps the icon at opacity 0 under the cursor and fades it in
+      // just before the click: the hover only starts once it is seen intact.
+      document.body.innerHTML = '<dialog></dialog>';
+      const dialog = document.querySelector('dialog')!;
+      markTopLayer(dialog, ':modal');
+      const { ov, field, icon, env } = openOverlay(dialog);
+      const onIcon = vi.fn();
+      ov.showIcon(field, onIcon);
+      env.t += 400;
+      dialog.style.opacity = '0';
+      hoverFor(icon, 1000);
+      dialog.style.opacity = '1';
+      env.t += 50;
+      downAndClick(icon); // no pointer movement since the fade-in
+      expect(onIcon).not.toHaveBeenCalled();
+      icon.dispatchEvent(pointer('pointermove', 197, 22)); // seen intact from now on
+      env.t += 300;
+      downAndClick(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('does not require hovering for touch', () => {
+      const { ov, icon, onIcon } = shown();
+      downAndClick(icon, 'touch');
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+  });
+
   it('needs a pointerdown on the same control shortly before the click', () => {
     document.body.innerHTML = '';
     const { field, ov, icon, env } = openOverlay(document.body);
@@ -692,6 +781,7 @@ describe('activation guard', () => {
     env.t += 400;
     icon.dispatchEvent(new MouseEvent('click', { clientX: 196, clientY: 22, detail: 1, cancelable: true }));
     expect(onIcon).not.toHaveBeenCalled();
+    hoverFor(icon);
     icon.dispatchEvent(new MouseEvent('pointerdown', { clientX: 196, clientY: 22, detail: 1 }));
     env.t += 2500;
     icon.dispatchEvent(new MouseEvent('click', { clientX: 196, clientY: 22, detail: 1, cancelable: true }));
