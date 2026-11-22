@@ -436,6 +436,23 @@ describe('pending lifecycle', () => {
     expect(deps.setBadge).toHaveBeenCalledWith(7, false);
   });
 
+  it('expiry keeps the record while another tab still holds the same value (A/B/A)', async () => {
+    let t = 1000;
+    const deps = makeDeps({ now: () => t });
+    await routeSaveMessage(capture('A'), csSender, deps);
+    t += 10_000;
+    await routeSaveMessage(capture('B'), { ...csSender, tab: { id: 8 } }, deps);
+    t += 10_000;
+    expect(await routeSaveMessage(capture('A'), { ...csSender, tab: { id: 9 } }, deps)).toEqual({ ok: true });
+    t = 1000 + PENDING_TTL_MS + 1; // only tab 7's A has expired
+    sweepExpiredPending(deps);
+    expect(deps.pending.has(7)).toBe(false);
+    expect(deps.pending.get(9)?.password).toBe('A');
+    // A is still on offer in tab 9, so another submit of A stays quiet.
+    expect(await routeSaveMessage(capture('A'), { ...csSender, tab: { id: 10 } }, deps)).toEqual({ ok: false });
+    expect(deps.pending.has(10)).toBe(false);
+  });
+
   it('expiry keeps the record of a newer capture of the same login', async () => {
     let t = 1000;
     const deps = makeDeps({ now: () => t });
@@ -520,13 +537,51 @@ describe('typed password already stored', () => {
 
   it('stays quiet when the one matching login already holds this password', async () => {
     const request = vault(ok({ matches: true }));
-    const deps = makeDeps({ request });
+    const deps = makeDeps({ request, notifyPendingChanged: vi.fn() });
     // Same reply as a held capture: the response is not a match signal.
     expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
     expect(request).toHaveBeenCalledWith('https://a.com', 'login_password_matches', { entry_id: 'e1', password: 'pw', url: 'https://a.com/login' });
     expect(deps.pending.size).toBe(0);
     expect(deps.setBadge).not.toHaveBeenCalled();
     expect(deps.promptSave).not.toHaveBeenCalled();
+    expect(deps.notifyPendingChanged).not.toHaveBeenCalled();
+  });
+
+  it('drops an older capture held for the tab when the latest submit matches', async () => {
+    let matches = false;
+    const request = vi.fn(async (_o: string, action: string) =>
+      action === 'get_logins' ? ok({ items: [{ id: 'e1', username: 'alice' }] }) : ok({ matches }));
+    const deps = makeDeps({ request, notifyPendingChanged: vi.fn() });
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'old' }, csSender, deps);
+    expect(deps.pending.get(7)?.password).toBe('old');
+    (deps.setBadge as any).mockClear(); (deps.notifyPendingChanged as any).mockClear();
+
+    matches = true;
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+    expect(deps.pending.has(7)).toBe(false);
+    expect(deps.setBadge).toHaveBeenCalledWith(7, false);
+    expect(deps.notifyPendingChanged).toHaveBeenCalledWith(7);
+    // The dropped value was never decided on, so typing it again is offered.
+    matches = false;
+    expect(await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'old' }, csSender, deps)).toEqual({ ok: true });
+    expect(deps.pending.get(7)?.password).toBe('old');
+  });
+
+  it('a late match does not drop a capture that overtook it', async () => {
+    let release!: (r: NmhResponse) => void;
+    let first = true;
+    const request = vi.fn((_o: string, action: string) => {
+      if (action === 'get_logins') return Promise.resolve(ok({ items: [{ id: 'e1', username: 'alice' }] }));
+      if (first) { first = false; return new Promise<NmhResponse>((r) => { release = r; }); }
+      return Promise.resolve(ok({ matches: false }));
+    });
+    const deps = makeDeps({ request });
+    const a = routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await vi.waitFor(() => expect(first).toBe(false));
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'B' }, csSender, deps);
+    release(ok({ matches: true }));
+    await a;
+    expect(deps.pending.get(7)?.password).toBe('B');
   });
 
   it('does not remember the quiet capture, so a later vault change is offered', async () => {

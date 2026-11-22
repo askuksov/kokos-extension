@@ -120,24 +120,29 @@ function expired(p: Pending, deps: SaveBridgeDeps): boolean {
   return deps.now() - p.ts > PENDING_TTL_MS;
 }
 
-// Drop an expired capture: its password, its badge, and its "already offered"
-// record, so the same login typed again later is offered again.
-function expire(tabId: number, p: Pending, deps: SaveBridgeDeps): void {
+// Drop a capture nobody decided on (expired, or outdated by a newer submit):
+// its password, its badge, and its "already offered" record, so the same
+// login typed again later is offered again. The record stays while another
+// tab still holds a live capture of the same login and value.
+function discard(tabId: number, p: Pending, deps: SaveBridgeDeps): void {
   deps.pending.delete(tabId);
   deps.setBadge(tabId, false);
   deps.notifyPendingChanged?.(tabId);
-  forgetPrompt(deps.gate, { origin: p.origin, username: p.username, token: valueToken(p.password) });
+  const token = valueToken(p.password);
+  const stillOffered = [...deps.pending.values()].some((q) =>
+    q.origin === p.origin && q.username === p.username && !expired(q, deps) && valueToken(q.password) === token);
+  if (!stillOffered) forgetPrompt(deps.gate, { origin: p.origin, username: p.username, token });
 }
 
 /** Drop every held capture past its TTL. Safe to call at any time. */
 export function sweepExpiredPending(deps: SaveBridgeDeps): void {
-  for (const [tabId, p] of [...deps.pending]) if (expired(p, deps)) expire(tabId, p, deps);
+  for (const [tabId, p] of [...deps.pending]) if (expired(p, deps)) discard(tabId, p, deps);
 }
 
 function livePending(tabId: number, deps: SaveBridgeDeps): Pending | null {
   const p = deps.pending.get(tabId);
   if (!p) return null;
-  if (expired(p, deps)) { expire(tabId, p, deps); return null; }
+  if (expired(p, deps)) { discard(tabId, p, deps); return null; }
   return p;
 }
 
@@ -206,7 +211,13 @@ async function handleCapture(msg: SaveCaptureMsg, sender: SaveSenderLike, deps: 
   // Nothing to save or update. Not recorded in the gate: if the vault copy
   // changes later, the same typed password must be offered again. Answers like
   // a held capture, so the reply never tells a match from a mismatch.
-  if (await alreadyStored(origin, url, msg.username, msg.password, deps)) return { ok: true };
+  if (await alreadyStored(origin, url, msg.username, msg.password, deps)) {
+    // An older capture still held for this tab is outdated by this submit:
+    // saving it now would overwrite the password that was just used.
+    const older = deps.pending.get(tabId);
+    if (older && !superseded()) discard(tabId, older, deps);
+    return { ok: true };
+  }
   // Consent can be withdrawn while the checks above awaited storage: ask again
   // right before the password is held.
   if (await noConsent()) return { ok: false };
