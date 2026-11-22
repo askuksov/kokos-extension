@@ -432,6 +432,36 @@ describe('overlayHostIntact', () => {
     expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
   });
 
+  it('passes with an invert filter on <html>, as a dark-mode extension sets', () => {
+    document.body.innerHTML = '';
+    document.documentElement.style.filter = 'invert(1) hue-rotate(180deg)';
+    const host = hostIn(document.documentElement);
+    expect(overlayHostIntact(host)).toBe(true);
+    host.remove();
+    document.documentElement.style.removeProperty('filter');
+  });
+
+  it('passes with a page-wide grayscale on <body>', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    document.body.style.filter = 'grayscale(1)';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(true);
+    document.body.style.removeProperty('filter');
+  });
+
+  it('still rejects a filter on a dialog under a filtered <html>', () => {
+    document.body.innerHTML = '<dialog style="filter: invert(1)"></dialog>';
+    document.documentElement.style.filter = 'invert(1)';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+    document.documentElement.style.removeProperty('filter');
+  });
+
+  it('still counts opacity on <body>', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    document.body.style.opacity = '0.2';
+    expect(overlayHostIntact(hostIn(document.querySelector('dialog')!))).toBe(false);
+    document.body.style.removeProperty('opacity');
+  });
+
   it('rejects a host that is not in the document', () => {
     expect(overlayHostIntact(document.createElement('div'))).toBe(false);
   });
