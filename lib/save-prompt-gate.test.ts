@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newGateState, valueToken, shouldBadge, recordPrompt, recordSaved, wasSaved, forgetSaved } from './save-prompt-gate';
+import { newGateState, valueToken, shouldBadge, recordPrompt, forgetPrompt, recordSaved, wasSaved, forgetSaved } from './save-prompt-gate';
 
 describe('save-prompt-gate', () => {
   const k = (token: string) => ({ origin: 'https://a.com', username: 'alice', token });
@@ -33,5 +33,21 @@ describe('save-prompt-gate — saved values', () => {
     expect(wasSaved(s, { ...k, token: valueToken('other') })).toBe(false);
     forgetSaved(s, k);
     expect(wasSaved(s, k)).toBe(false);
+  });
+});
+
+describe('save-prompt-gate — forgetPrompt', () => {
+  const k = (token: string) => ({ origin: 'https://a.com', username: 'alice', token });
+  it('re-arms the value it forgets', () => {
+    const s = newGateState();
+    recordPrompt(s, k(valueToken('pw1')));
+    forgetPrompt(s, k(valueToken('pw1')));
+    expect(shouldBadge(s, k(valueToken('pw1')))).toBe(true);
+  });
+  it('keeps a newer value recorded for the same login', () => {
+    const s = newGateState();
+    recordPrompt(s, k(valueToken('pw2')));
+    forgetPrompt(s, k(valueToken('pw1')));
+    expect(shouldBadge(s, k(valueToken('pw2')))).toBe(false);
   });
 });
