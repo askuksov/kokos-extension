@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, type OverlayMatch } from './overlay';
+import { isFillableGeometry, positionFor, iconLeftAvoiding, renderMatches, createOverlay, topLayerAncestor, type OverlayMatch } from './overlay';
 
 function stubRect(el: Element, rect: Partial<DOMRect>): void {
   (el as any).getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 30, right: 100, bottom: 30, x: 0, y: 0, toJSON() {}, ...rect });
@@ -273,6 +273,126 @@ describe('createOverlay', () => {
     ov.destroy();
     ov.showIcon(field, () => {});
     expect(host.isConnected).toBe(false);
+  });
+});
+
+// jsdom does not know :modal / :popover-open, so the top-layer state is
+// stubbed on the element the way the browser would report it.
+function markTopLayer(el: Element, pseudo: ':modal' | ':popover-open', on = true): void {
+  const base = Element.prototype.matches;
+  (el as any).matches = function (sel: string) { return sel === pseudo ? on : base.call(this, sel); };
+}
+
+describe('topLayerAncestor', () => {
+  it('finds the modal dialog around a field', () => {
+    document.body.innerHTML = '<dialog><form><input type="password"></form></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    markTopLayer(dialog, ':modal');
+    expect(topLayerAncestor(document.querySelector('input')!)).toBe(dialog);
+  });
+  it('ignores a dialog opened without showModal', () => {
+    document.body.innerHTML = '<dialog open><input type="password"></dialog>';
+    markTopLayer(document.querySelector('dialog')!, ':modal', false);
+    expect(topLayerAncestor(document.querySelector('input')!)).toBeNull();
+  });
+  it('finds an open popover, the nearest top-layer element first', () => {
+    document.body.innerHTML = '<dialog><div popover><input type="password"></div></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    const pop = document.querySelector('[popover]')!;
+    markTopLayer(dialog, ':modal');
+    markTopLayer(pop, ':popover-open');
+    expect(topLayerAncestor(document.querySelector('input')!)).toBe(pop);
+  });
+  it('treats a selector the engine does not know as not in the top layer', () => {
+    document.body.innerHTML = '<dialog><input type="password"></dialog>';
+    (document.querySelector('dialog') as any).matches = () => { throw new SyntaxError('unknown pseudo-class'); };
+    expect(topLayerAncestor(document.querySelector('input')!)).toBeNull();
+  });
+});
+
+describe('overlay host in the top layer', () => {
+  function hostOf(): HTMLElement | undefined {
+    return Array.from(document.querySelectorAll('div'))
+      .find((h) => (h as HTMLElement).style.zIndex === '2147483647') as HTMLElement | undefined;
+  }
+  function fieldIn(container: Element): HTMLInputElement {
+    const field = document.createElement('input');
+    field.type = 'password';
+    field.getBoundingClientRect = () => ({ left: 10, top: 10, width: 200, height: 24, right: 210, bottom: 34, x: 10, y: 10, toJSON() {} }) as DOMRect;
+    container.appendChild(field);
+    return field;
+  }
+  function stubHitTest(field: Element) {
+    (document as any).elementFromPoint = () => field; (document as any).elementsFromPoint = () => [field];
+  }
+
+  it('mounts inside a modal dialog so the icon is above the backdrop and not inert', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    markTopLayer(dialog, ':modal');
+    const field = fieldIn(dialog);
+    stubHitTest(field);
+    const ov = createOverlay(document);
+    ov.showIcon(field, () => {});
+    const host = hostOf()!;
+    expect(host.parentElement).toBe(dialog);
+    expect(host.style.position).toBe('fixed'); // not clipped by the dialog's scroll box
+    ov.destroy();
+  });
+
+  it('moves the matches list and toast with the field into an open popover', () => {
+    document.body.innerHTML = '<div popover></div>';
+    const pop = document.querySelector('[popover]')!;
+    markTopLayer(pop, ':popover-open');
+    const field = fieldIn(pop);
+    const ov = createOverlay(document);
+    ov.showMatches(field, [{ id: 'a', title: 'A' }], () => {});
+    expect(hostOf()!.parentElement).toBe(pop);
+    ov.destroy();
+  });
+
+  it('returns to the document root once the dialog has closed', () => {
+    document.body.innerHTML = '<dialog></dialog>';
+    const dialog = document.querySelector('dialog')!;
+    markTopLayer(dialog, ':modal');
+    const inside = fieldIn(dialog);
+    stubHitTest(inside);
+    const ov = createOverlay(document);
+    ov.showIcon(inside, () => {});
+    markTopLayer(dialog, ':modal', false); // dialog.close()
+    const outside = fieldIn(document.body);
+    stubHitTest(outside);
+    ov.showIcon(outside, () => {});
+    const host = hostOf()!;
+    expect(host.parentElement).toBe(document.documentElement);
+    expect(host.style.position).toBe('absolute');
+    ov.destroy();
+  });
+
+  it('stays in a popover that is still open when a field outside it is shown', () => {
+    // Moving out and back in on every scan would trigger the next scan forever.
+    document.body.innerHTML = '<div popover></div>';
+    const pop = document.querySelector('[popover]')!;
+    markTopLayer(pop, ':popover-open');
+    const inside = fieldIn(pop);
+    const outside = fieldIn(document.body);
+    stubHitTest(inside);
+    const ov = createOverlay(document);
+    ov.showIcon(inside, () => {});
+    stubHitTest(outside);
+    ov.showGeneratorIcon(outside, () => {});
+    expect(hostOf()!.parentElement).toBe(pop);
+    ov.destroy();
+  });
+
+  it('stays at the document root for a field outside any top layer', () => {
+    document.body.innerHTML = '';
+    const field = fieldIn(document.body);
+    stubHitTest(field);
+    const ov = createOverlay(document);
+    ov.showIcon(field, () => {});
+    expect(hostOf()!.parentElement).toBe(document.documentElement);
+    ov.destroy();
   });
 });
 

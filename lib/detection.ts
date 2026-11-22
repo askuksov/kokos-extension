@@ -55,7 +55,7 @@ export function detectLoginForms(root: ParentNode): LoginForm[] {
 
 export function watch(target: Node, onChange: () => void): () => void {
   const obs = new MutationObserver(() => onChange());
-  obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'autocomplete', 'name', 'id'] });
+  obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'autocomplete', 'name', 'id', 'open'] });
   return () => obs.disconnect();
 }
 
@@ -93,9 +93,11 @@ export function watchLayout(win: Pick<Window, 'addEventListener' | 'removeEventL
 // Layout that settles with no DOM mutation and no resize: a modal that scales
 // in (script-driven animations fire no DOM event), a page that hides its
 // scrollbar while a modal is open, an icon font that loads after the field
-// rendered. `onMutation` is called on every DOM change; `onSettle` runs when a
-// CSS transition or animation ends, when fonts finish loading, and once more
-// `settleMs` after the last DOM change.
+// rendered, a popover or dialog that opens or closes. `onMutation` is called
+// on every DOM change; `onSettle` runs when a CSS transition or animation
+// ends, when a popover or dialog toggles or a dialog closes (caught in the
+// capture phase, as these do not bubble), when fonts finish loading, and once
+// more `settleMs` after the last DOM change.
 export function watchSettle(
   doc: Document,
   win: Pick<Window, 'setTimeout' | 'clearTimeout'>,
@@ -105,8 +107,8 @@ export function watchSettle(
   let timer: ReturnType<Window['setTimeout']> | null = null;
   let stopped = false;
   const fire = () => { if (!stopped) onSettle(); };
-  doc.addEventListener('transitionend', fire, true);
-  doc.addEventListener('animationend', fire, true);
+  const events = ['transitionend', 'animationend', 'toggle', 'close'];
+  for (const e of events) doc.addEventListener(e, fire, true);
   const fonts = (doc as Document & { fonts?: EventTarget }).fonts;
   fonts?.addEventListener?.('loadingdone', fire);
   return {
@@ -118,8 +120,7 @@ export function watchSettle(
     stop() {
       stopped = true;
       if (timer !== null) win.clearTimeout(timer);
-      doc.removeEventListener('transitionend', fire, true);
-      doc.removeEventListener('animationend', fire, true);
+      for (const e of events) doc.removeEventListener(e, fire, true);
       fonts?.removeEventListener?.('loadingdone', fire);
     },
   };

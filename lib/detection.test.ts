@@ -73,6 +73,20 @@ describe('watch', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it('fires when a dialog or details element opens', async () => {
+    const root = document.createElement('div');
+    const dialog = document.createElement('dialog');
+    root.appendChild(dialog);
+    document.body.appendChild(root);
+    const cb = vi.fn();
+    const stop = watch(root, cb);
+    dialog.setAttribute('open', '');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cb).toHaveBeenCalled();
+    stop();
+    root.remove();
+  });
+
   it('keeps firing on a Document after the page replaces <html>', async () => {
     const doc = document.implementation.createHTMLDocument('t');
     const cb = vi.fn();
@@ -233,6 +247,10 @@ describe('watchSettle', () => {
     el.dispatchEvent(new Event('transitionend', { bubbles: true }));
     el.dispatchEvent(new Event('animationend', { bubbles: true }));
     expect(cb).toHaveBeenCalledTimes(2);
+    // Popover/dialog toggle and dialog close do not bubble: caught in capture.
+    el.dispatchEvent(new Event('toggle'));
+    el.dispatchEvent(new Event('close'));
+    expect(cb).toHaveBeenCalledTimes(4);
     s.stop();
     el.remove();
   });
