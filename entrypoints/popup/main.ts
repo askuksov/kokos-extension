@@ -80,7 +80,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
     const status = document.createElement('div'); status.className = 'status hint';
     const unlock = document.createElement('button'); unlock.className = 'primary'; unlock.textContent = t('unlockAndSave');
     const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
-    dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); box.textContent = ''; };
+    dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); await renderSave(tab); };
     unlock.onclick = async () => {
       unlock.disabled = dismiss.disabled = true; status.textContent = t('unlockInKokos');
       saveInFlight = true;
@@ -111,7 +111,7 @@ async function renderSave(tab: chrome.tabs.Tab): Promise<void> {
   primary.textContent = isUpdate ? t('update') : t('save');
 
   const dismiss = document.createElement('button'); dismiss.className = 'ghost'; dismiss.textContent = t('notNow');
-  dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); box.textContent = ''; };
+  dismiss.onclick = async () => { await saveMsg({ type: 'dismiss-pending-save', tabId: tab.id, token: view.token }); await renderSave(tab); };
 
   const never = document.createElement('button'); never.className = 'ghost'; never.textContent = t('neverHere');
   never.onclick = async () => { await saveMsg({ type: 'never-save-here', tabId: tab.id }); box.textContent = ''; };
