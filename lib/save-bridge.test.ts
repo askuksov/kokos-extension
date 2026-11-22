@@ -260,8 +260,12 @@ describe('save-capture — out-of-order completion', () => {
     await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
     await routeSaveMessage({ type: 'commit-pending-save', tabId: 7 }, popupSender, deps);
 
+    // Only repeat A's vault lookup hangs; B's own lookups answer at once.
     let release!: (r: NmhResponse) => void;
-    deps.request = vi.fn(() => new Promise<NmhResponse>((r) => { release = r; }));
+    let calls = 0;
+    deps.request = vi.fn(() => ++calls === 1
+      ? new Promise<NmhResponse>((r) => { release = r; })
+      : Promise.resolve(ok({ items: [] })));
     const repeatA = routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
     await vi.waitFor(() => expect(deps.request).toHaveBeenCalled());
 
@@ -371,13 +375,16 @@ describe('pending lifecycle', () => {
 
   it('a capture that replaces the one being committed survives the commit', async () => {
     let release!: (r: NmhResponse) => void;
+    let hold = false; // only the commit's lookup hangs
     const request = vi.fn((_o: string, action: string) =>
-      action === 'get_logins' ? new Promise<NmhResponse>((r) => { release = r; }) : Promise.resolve(ok({ entry_id: 'e' })));
+      action === 'get_logins' && hold ? new Promise<NmhResponse>((r) => { release = r; hold = false; })
+        : Promise.resolve(ok(action === 'get_logins' ? { items: [] } : { entry_id: 'e' })));
     let n = 0;
     const deps = makeDeps({ request, newToken: () => `tok${++n}` });
     await routeSaveMessage(capture('A'), csSender, deps);
+    hold = true;
     const committing = routeSaveMessage({ type: 'commit-pending-save', tabId: 7, token: 'tok1' }, popupSender, deps);
-    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    await vi.waitFor(() => expect(hold).toBe(false));
 
     await routeSaveMessage(capture('B'), csSender, deps);
     (deps.setBadge as any).mockClear();
@@ -502,5 +509,66 @@ describe('open popup notification', () => {
     await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
     await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
     expect(notifyPendingChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('typed password already stored', () => {
+  const capture = { type: 'save-capture', username: 'alice', password: 'pw' };
+  const vault = (check: NmhResponse) => vi.fn(async (_o: string, action: string) =>
+    action === 'get_logins' ? ok({ items: [{ id: 'e1', username: 'Alice' }] }) : check);
+
+  it('stays quiet when the one matching login already holds this password', async () => {
+    const request = vault(ok({ matches: true }));
+    const deps = makeDeps({ request });
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: false });
+    expect(request).toHaveBeenCalledWith('https://a.com', 'login_password_matches', { entry_id: 'e1', password: 'pw', url: 'https://a.com/login' });
+    expect(deps.pending.size).toBe(0);
+    expect(deps.setBadge).not.toHaveBeenCalled();
+    expect(deps.promptSave).not.toHaveBeenCalled();
+  });
+
+  it('does not remember the quiet capture, so a later vault change is offered', async () => {
+    const deps = makeDeps({ request: vault(ok({ matches: true })) });
+    await routeSaveMessage(capture, csSender, deps);
+    deps.request = vault(ok({ matches: false }));
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['a different password', ok({ matches: false })],
+    ['an app without the action', fail('unknown_action')],
+    ['a refused check', fail('denied')],
+    ['a malformed answer', ok({ matches: 'yes' })],
+  ])('offers the update for %s', async (_name, check) => {
+    const deps = makeDeps({ request: vault(check) });
+    expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+    expect(deps.pending.get(7)).toMatchObject({ username: 'alice', password: 'pw' });
+    expect(deps.promptSave).toHaveBeenCalledWith(7);
+  });
+
+  it('asks nothing for a new login or a locked vault', async () => {
+    for (const lookup of [ok({ items: [{ id: 'e1', username: 'bob' }] }), fail('locked')]) {
+      const request = vi.fn(async () => lookup);
+      const deps = makeDeps({ request });
+      expect(await routeSaveMessage(capture, csSender, deps)).toEqual({ ok: true });
+      expect(request).not.toHaveBeenCalledWith(expect.anything(), 'login_password_matches', expect.anything());
+    }
+  });
+
+  it('drops the result of a check that a newer capture overtook', async () => {
+    let release!: (r: NmhResponse) => void;
+    let first = true;
+    const request = vi.fn((_o: string, action: string) => {
+      if (action === 'get_logins') return Promise.resolve(ok({ items: [{ id: 'e1', username: 'alice' }] }));
+      if (first) { first = false; return new Promise<NmhResponse>((r) => { release = r; }); }
+      return Promise.resolve(ok({ matches: false }));
+    });
+    const deps = makeDeps({ request });
+    const a = routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'A' }, csSender, deps);
+    await vi.waitFor(() => expect(first).toBe(false));
+    await routeSaveMessage({ type: 'save-capture', username: 'alice', password: 'B' }, csSender, deps);
+    release(ok({ matches: false }));
+    expect(await a).toEqual({ ok: false });
+    expect(deps.pending.get(7)?.password).toBe('B');
   });
 });
