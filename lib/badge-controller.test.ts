@@ -52,6 +52,12 @@ describe('computeProbe — non-enabled site → get_status', () => {
     const deps = makeDeps({ isEnabled: vi.fn(async () => false), request: vi.fn(async () => fail('app_not_running')) });
     expect(await computeProbe(deps, 'https://b.com/')).toEqual({ kind: 'not-running' });
   });
+  it('not-running when get_status answers ok with running: false', async () => {
+    for (const payload of [{ running: false, locked: false }, { running: false, locked: true }]) {
+      const deps = makeDeps({ isEnabled: vi.fn(async () => false), request: vi.fn(async () => ok(payload)) });
+      expect(await computeProbe(deps, 'https://b.com/')).toEqual({ kind: 'not-running' });
+    }
+  });
   it('locked when running & locked', async () => {
     const deps = makeDeps({ isEnabled: vi.fn(async () => false), request: vi.fn(async () => ok({ running: true, locked: true })) });
     expect(await computeProbe(deps, 'https://b.com/')).toEqual({ kind: 'locked' });
