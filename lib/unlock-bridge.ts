@@ -7,6 +7,7 @@
 // Chrome-free (deps injected), like save-bridge.ts.
 
 import type { NmhResponse } from './nmh-client';
+import { httpOrigin } from './url';
 
 // After the user cancels the dialog, stay quiet for a while: the app refuses
 // too, this only saves the round trip.
@@ -43,16 +44,6 @@ export interface UnlockSenderLike {
 
 function err(code: string, message: string): NmhResponse {
   return { id: 'unlock', ok: false, error: { code, message } };
-}
-
-function httpOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Asks the app to unlock for `url`. One request at a time: a second call
