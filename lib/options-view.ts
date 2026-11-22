@@ -3,17 +3,36 @@
 // the render logic is unit-testable. Every site string is rendered via textContent,
 // never innerHTML.
 
-export function displayHost(origin: string): string {
-  try { return new URL(origin).host || origin; } catch { return origin; }
+/** The full origin including the scheme, so http://a.com and https://a.com
+ * (distinct entries in the site lists) never look alike. Anything that does not
+ * parse to a tuple origin is shown as-is. */
+export function displayOrigin(origin: string): string {
+  try {
+    const o = new URL(origin).origin;
+    return o === 'null' ? origin : o;
+  } catch { return origin; }
 }
 
-/** One management row: the site host as text + an action button that calls
- * onAction(origin). The button label is passed in (localized by the caller). */
+/** Runs tasks one at a time in call order; a failed task does not block the
+ * ones after it (its rejection still reaches its own caller). */
+export function createQueue(): <T>(task: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (task) => {
+    const run = tail.then(task);
+    tail = run.catch(() => { /* keep the queue going */ });
+    return run;
+  };
+}
+
+/** One management row: the site origin as text + an action button that calls
+ * onAction(origin). The button label is passed in (localized by the caller);
+ * the button's accessible name adds the origin so rows are told apart. */
 export function buildSiteRow(origin: string, actionLabel: string, onAction: (origin: string) => void): HTMLElement {
   const row = document.createElement('div'); row.className = 'site-row';
   const label = document.createElement('span'); label.className = 'site';
-  label.textContent = displayHost(origin);
+  label.textContent = displayOrigin(origin);
   const btn = document.createElement('button'); btn.textContent = actionLabel;
+  btn.setAttribute('aria-label', `${actionLabel} ${label.textContent}`);
   btn.onclick = () => onAction(origin);
   row.append(label, btn);
   return row;

@@ -1,6 +1,6 @@
 import { listEnabledSites, disableSite } from '../../lib/site-access';
 import { listIgnoredSaveSites, removeSaveIgnore } from '../../lib/save-ignore';
-import { buildSiteRow, buildToggleRow } from '../../lib/options-view';
+import { buildSiteRow, buildToggleRow, createQueue } from '../../lib/options-view';
 import { loadIconPrefs, setShowIcon, listIconHiddenSites, showIconOn, isIconPrefsChange } from '../../lib/icon-prefs';
 import { t } from '../../lib/strings';
 import { LOCAL_CONSENT_KEY, MANAGED_CONSENT_KEY, type ConsentState } from '../../lib/data-consent';
@@ -32,28 +32,50 @@ async function renderConsent(): Promise<void> {
   };
 }
 
-async function renderList(
+// One queue per list: a row action, the redraw after it and a storage-driven
+// redraw never overlap, so no update is lost and no row is drawn twice.
+const queues = new Map<string, ReturnType<typeof createQueue>>();
+
+function renderList(
   boxId: string,
   load: () => Promise<string[]>,
   actionLabel: string,
   act: (origin: string) => Promise<void>,
 ): Promise<void> {
+  let queue = queues.get(boxId);
+  if (!queue) { queue = createQueue(); queues.set(boxId, queue); }
+  const run = queue;
+  const draw = () => drawList(boxId, load, actionLabel, onAction);
+  const onAction = async (origin: string): Promise<void> => {
+    // Disable the whole list while the action runs; the redraw replaces the buttons.
+    const buttons = Array.from(document.getElementById(boxId)!.querySelectorAll('button'));
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+      await run(async () => {
+        try { await act(origin); } finally { await draw(); }
+      });
+    } finally {
+      buttons.forEach((b) => { b.disabled = false; });
+    }
+  };
+  return run(draw);
+}
+
+async function drawList(
+  boxId: string,
+  load: () => Promise<string[]>,
+  actionLabel: string,
+  onAction: (origin: string) => Promise<void>,
+): Promise<void> {
   const box = document.getElementById(boxId)!;
   const sites = await load();
-  // Cleared after the read, not before: two overlapping renders (an action's own
-  // redraw and the storage.onChanged one) would otherwise both append their rows.
   box.textContent = '';
   if (sites.length === 0) {
     const p = document.createElement('div'); p.className = 'empty'; p.textContent = t('optNoSites');
     box.appendChild(p);
     return;
   }
-  for (const origin of sites) {
-    box.appendChild(buildSiteRow(origin, actionLabel, async (o) => {
-      await act(o);
-      await renderList(boxId, load, actionLabel, act);
-    }));
-  }
+  for (const origin of sites) box.appendChild(buildSiteRow(origin, actionLabel, onAction));
 }
 
 // In-field icon: global switch + the sites where the popup hid it.
