@@ -206,10 +206,15 @@ const MIN_OPACITY = 0.9;
 // clipping and blending of every element above it (the page's <html>, or a
 // page-owned <dialog> or popover), so a hostile page could fade, disguise or
 // clip the icon and the list and steer the user into a fill click they did not
-// mean. Any of those on the chain counts as tampering. Run on activation only:
-// it reads computed styles for the whole ancestor chain.
+// mean. Any of those on the chain counts as tampering, except a filter, clip
+// or blend mode on <html> or <body>: that applies to the whole page alike (a
+// dark-mode extension's invert filter, a site-wide grayscale) and cannot set
+// the overlay apart from the content the user sees. Opacity and visibility
+// count everywhere. Run on activation only: it reads computed styles for the
+// whole ancestor chain.
 export function overlayHostIntact(host: Element): boolean {
-  const view = host.ownerDocument.defaultView;
+  const doc = host.ownerDocument;
+  const view = doc.defaultView;
   if (!view || !host.isConnected) return false;
   const check = (host as Element & { checkVisibility?: (o: object) => boolean }).checkVisibility;
   if (typeof check === 'function' && !check.call(host, { opacityProperty: true, visibilityProperty: true })) return false;
@@ -221,6 +226,7 @@ export function overlayHostIntact(host: Element): boolean {
     if (el === host && (cs.visibility === 'hidden' || cs.visibility === 'collapse')) return false;
     const o = parseFloat(cs.opacity);
     if (!Number.isNaN(o)) opacity *= o;
+    if (el === doc.documentElement || el === doc.body) continue;
     if (changed(cs.getPropertyValue('filter'), 'none')
       || changed(cs.getPropertyValue('backdrop-filter'), 'none')
       || changed(cs.getPropertyValue('clip-path'), 'none')
