@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { classifyField, detectLoginForms, watch, watchLayout, perFrame, sameOriginAsTop } from './detection';
+import { classifyField, detectLoginForms, watch, watchLayout, watchSettle, perFrame, sameOriginAsTop } from './detection';
 
 function input(attrs: Record<string, string>): HTMLInputElement {
   const el = document.createElement('input');
@@ -197,6 +197,69 @@ describe('perFrame', () => {
     expect(timers).toHaveLength(1);
     timers.shift()!();
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('watchSettle', () => {
+  function fakeTimers() {
+    const timers = new Map<number, () => void>();
+    let next = 1;
+    const win = {
+      setTimeout: (cb: () => void) => { timers.set(next, cb); return next++; },
+      clearTimeout: (id: number) => { timers.delete(id); },
+    };
+    const flush = () => { for (const [id, cb] of [...timers]) { timers.delete(id); cb(); } };
+    return { win, timers, flush };
+  }
+
+  it('settles once after the last of a burst of DOM changes', () => {
+    const { win, timers, flush } = fakeTimers();
+    const cb = vi.fn();
+    const s = watchSettle(document, win as any, cb);
+    s.onMutation(); s.onMutation(); s.onMutation();
+    expect(timers.size).toBe(1);
+    expect(cb).not.toHaveBeenCalled();
+    flush();
+    expect(cb).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+
+  it('settles when a CSS transition or animation ends', () => {
+    const { win } = fakeTimers();
+    const cb = vi.fn();
+    const s = watchSettle(document, win as any, cb);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    el.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    el.dispatchEvent(new Event('animationend', { bubbles: true }));
+    expect(cb).toHaveBeenCalledTimes(2);
+    s.stop();
+    el.remove();
+  });
+
+  it('settles when fonts finish loading', () => {
+    const { win } = fakeTimers();
+    const fonts = new EventTarget();
+    const doc = document.implementation.createHTMLDocument('t');
+    Object.defineProperty(doc, 'fonts', { value: fonts });
+    const cb = vi.fn();
+    const s = watchSettle(doc, win as any, cb);
+    fonts.dispatchEvent(new Event('loadingdone'));
+    expect(cb).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+
+  it('does nothing after stop()', () => {
+    const { win, timers, flush } = fakeTimers();
+    const cb = vi.fn();
+    const s = watchSettle(document, win as any, cb);
+    s.onMutation();
+    s.stop();
+    flush();
+    s.onMutation();
+    document.body.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    expect(timers.size).toBe(0);
+    expect(cb).not.toHaveBeenCalled();
   });
 });
 
