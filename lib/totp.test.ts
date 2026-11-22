@@ -87,7 +87,7 @@ describe('one digit per box', () => {
     input({ type: 'text', name: 'email' });
     const group = boxes(6);
     expect(findOtpField(document)).toBe(group[0]);
-    expect(findOtpBoxes(group[3])).toEqual(group);
+    expect(findOtpBoxes(group[3]!)).toEqual(group);
   });
 
   it('spreads the code one digit per box and fires input/change on each', async () => {
@@ -136,7 +136,7 @@ describe('one digit per box', () => {
     boxes(1, document.body, { type: 'hidden' });
     const rest = boxes(2);
     expect(findOtpField(document)).toBe(first[0]); // the hidden one is dropped; 4 usable remain adjacent
-    expect(findOtpBoxes(first[0])).toEqual([...first, ...rest]);
+    expect(findOtpBoxes(first[0]!)).toEqual([...first, ...rest]);
   });
 
   it('prefers a single one-time-code field over box detection (mixed page)', async () => {

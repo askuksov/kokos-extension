@@ -43,11 +43,15 @@ function isBox(input: HTMLInputElement): boolean {
  * in between) around list[idx]; empty when list[idx] is not a box. */
 function boxRunAt(list: HTMLInputElement[], idx: number): HTMLInputElement[] {
   const at = list[idx];
-  if (!isBox(at)) return [];
+  if (!at || !isBox(at)) return [];
+  const joins = (j: number): boolean => {
+    const el = list[j];
+    return !!el && isBox(el) && el.form === at.form;
+  };
   let from = idx;
   let to = idx;
-  while (from > 0 && isBox(list[from - 1]) && list[from - 1].form === at.form) from--;
-  while (to < list.length - 1 && isBox(list[to + 1]) && list[to + 1].form === at.form) to++;
+  while (joins(from - 1)) from--;
+  while (joins(to + 1)) to++;
   return list.slice(from, to + 1);
 }
 
@@ -75,7 +79,8 @@ export function findOtpField(root: ParentNode): HTMLInputElement | null {
   }
   for (let i = 0; i < inputs.length; i++) {
     const run = boxRunAt(inputs, i);
-    if (run.length >= BOX_MIN && run.length <= BOX_MAX) return run[0];
+    const head = run[0];
+    if (head && run.length >= BOX_MIN && run.length <= BOX_MAX) return head;
     i += Math.max(run.length - 1, 0);
   }
   return null;
@@ -118,7 +123,7 @@ export async function fillTotp(deps: TotpFillDeps): Promise<TotpFillOutcome> {
       // One digit per box: only when the group size matches the code length.
       const boxes = findOtpBoxes(otpField);
       if (boxes.length !== code.length) return { status: 'error' };
-      boxes.forEach((box, i) => setNativeValue(box, code[i]));
+      boxes.forEach((box, i) => setNativeValue(box, code[i] ?? ''));
     } else {
       setNativeValue(otpField, code);
     }
