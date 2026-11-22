@@ -34,6 +34,16 @@ describe('handleBridgeMessage', () => {
     expect(pm.calls).toHaveLength(0);
   });
 
+  it('refuses login_password_matches, which only the save flow may send', async () => {
+    const pm = fakePM();
+    const res = await handleBridgeMessage(
+      { type: 'nmh-request', origin: 'https://a.com', action: 'login_password_matches', payload: { entry_id: 'e1', password: 'guess' } },
+      pm,
+    );
+    expect(res).toMatchObject({ ok: false, error: { code: 'denied' } });
+    expect(pm.calls).toHaveLength(0);
+  });
+
   it('defaults an absent payload to an empty object', async () => {
     const pm = fakePM();
     await handleBridgeMessage({ type: 'nmh-request', origin: 'https://a.com', action: 'ping' }, pm);
