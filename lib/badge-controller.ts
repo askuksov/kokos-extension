@@ -26,7 +26,9 @@ export async function computeProbe(deps: BadgeDeps, url: string | undefined): Pr
 
   const r = await deps.request(origin, 'get_status', {});
   if (!r.ok) return { kind: 'not-running' };
-  return (r.payload as GetStatusResult)?.locked ? { kind: 'locked' } : { kind: 'no-permission' };
+  const status = r.payload as GetStatusResult | undefined;
+  if (status?.running === false) return { kind: 'not-running' };
+  return status?.locked ? { kind: 'locked' } : { kind: 'no-permission' };
 }
 
 /** A tabs.onUpdated change worth a refresh: the page finished loading, or its
