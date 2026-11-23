@@ -479,19 +479,22 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // Weak: match rows are replaced every time the list opens.
   const hoverSince = new WeakMap<Element, number>();
   const hoverCheckedAt = new WeakMap<Element, number>();
-  // Pens that have moved over the page without touching it (buttons 0). Only
-  // those can rest on a control before a press; a contact-only pen sends its
-  // pointerover right before pointerdown and is treated like touch.
-  const hoveringPens = new Set<number>();
-  const notePenHover = (e: Event) => {
+  // A pen is exempt from the hover dwell only on positive proof that it is
+  // contact-only: it entered this control already touching (buttons > 0) and
+  // no hovering event (buttons 0) for that pointer reached the control since.
+  // The proof comes from the control's own events, so a page that swallows
+  // events elsewhere can only make the guard stricter.
+  const penContactEntry = new WeakMap<Element, number>();
+  const notePen = (control: Element, e: Event) => {
     const p = e as PointerEvent;
-    if (p.pointerType === 'pen' && p.buttons === 0 && isTrusted(e)) hoveringPens.add(p.pointerId);
+    if (p.pointerType !== 'pen' || !isTrusted(e)) return;
+    if (p.buttons === 0) penContactEntry.delete(control);
+    else if (e.type === 'pointerover') penContactEntry.set(control, p.pointerId);
   };
-  view.addEventListener('pointermove', notePenHover, { capture: true, passive: true });
-  const needsHover = (e: Event): boolean => {
+  const needsHover = (e: Event, control: Element): boolean => {
     const p = e as PointerEvent;
     if (p.pointerType === 'touch') return false;
-    if (p.pointerType === 'pen') return hoveringPens.has(p.pointerId);
+    if (p.pointerType === 'pen') return penContactEntry.get(control) !== p.pointerId;
     return true;
   };
   const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
@@ -503,7 +506,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     // A row cut off by the viewport edge is ordinary; scroll and click again.
     if (!insideViewport(control, view)) return 'wait';
     if (ioVisible.get(ioTarget) === false && !pageFiltered()) return 'tamper';
-    if (e.type === 'pointerdown' && needsHover(e)
+    if (e.type === 'pointerdown' && needsHover(e, control)
       && now() - (hoverSince.get(control) ?? Infinity) < DWELL_MS) return 'wait';
     const keyboard = e.type === 'click' && e.detail === 0;
     if (keyboard) return root.activeElement === control ? 'ok' : 'tamper';
@@ -514,7 +517,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // Wires the guard onto one control; `act` runs only for a click that passed.
   const guard = (control: HTMLElement, ioTarget: Element, w: number, h: number, act: () => void) => {
     const checkHover = (e: Event) => {
-      notePenHover(e);
+      notePen(control, e);
       if (!isTrusted(e) || (e as PointerEvent).pointerType === 'touch') return;
       hoverCheckedAt.set(control, now());
       if (!overlayHostIntact(host)) hoverSince.delete(control);
@@ -522,9 +525,10 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     };
     control.addEventListener('pointerover', checkHover);
     control.addEventListener('pointermove', (e) => {
+      notePen(control, e);
       if (now() - (hoverCheckedAt.get(control) ?? -Infinity) >= HOVER_CHECK_MS) checkHover(e);
     });
-    control.addEventListener('pointerleave', () => { hoverSince.delete(control); });
+    control.addEventListener('pointerleave', () => { hoverSince.delete(control); penContactEntry.delete(control); });
     control.addEventListener('pointerdown', (e) => {
       const v = verdict(e as MouseEvent, control, ioTarget, w, h);
       armed = v === 'ok' ? { control, at: now() } : null;
@@ -651,7 +655,6 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     destroy() {
       destroyed = true;
       io?.disconnect();
-      view.removeEventListener('pointermove', notePenHover, { capture: true });
       host.remove();
     },
   };
