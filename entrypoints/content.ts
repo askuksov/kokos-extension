@@ -291,7 +291,8 @@ export function wireSaveCapture(
   };
   doc.addEventListener('submit', (e) => {
     const t = e.target;
-    const forms = detectLoginForms(t instanceof HTMLFormElement ? t : doc);
+    // Unfiltered: the page may already have disabled or hidden the form.
+    const forms = detectLoginForms(t instanceof HTMLFormElement ? t : doc, { usableOnly: false });
     captureFrom(forms[0]);
   }, true);
   doc.addEventListener('click', (e) => {
@@ -300,7 +301,7 @@ export function wireSaveCapture(
     // Formless SPA path: the `submit` event never fires, so a login-button click
     // is the gesture. Only a formless detected login form (no <form> ancestor)
     // is eligible — form-based logins are already covered by the submit listener.
-    const forms = detectLoginForms(doc);
+    const forms = detectLoginForms(doc, { usableOnly: false });
     captureFrom(forms.find((f) => f.password !== null && f.password.form === null));
   }, true);
 }

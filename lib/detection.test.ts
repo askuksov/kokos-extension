@@ -28,6 +28,20 @@ describe('classifyField', () => {
 });
 
 describe('detectLoginForms', () => {
+  it('includes disabled or hidden fields only when asked to', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `<form><fieldset disabled>
+      <input name="username" type="text" autocomplete="username">
+      <input name="password" type="password" autocomplete="current-password">
+    </fieldset></form>`;
+    document.body.appendChild(root);
+    expect(detectLoginForms(root)).toHaveLength(0);
+    const all = detectLoginForms(root, { usableOnly: false });
+    expect(all).toHaveLength(1);
+    expect(all[0]!.password).not.toBeNull();
+    root.remove();
+  });
+
   it('groups a classic username + current-password form', () => {
     const root = document.createElement('div');
     root.innerHTML = `<form>
@@ -85,6 +99,22 @@ describe('watch', () => {
     root.appendChild(document.createElement('input'));
     await new Promise((r) => setTimeout(r, 0));
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('fires when a field or its fieldset stops being disabled or hidden', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<fieldset disabled><div hidden><input type="password"></div></fieldset>';
+    document.body.appendChild(root);
+    const cb = vi.fn();
+    const stop = watch(root, cb);
+    root.querySelector('fieldset')!.removeAttribute('disabled');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cb).toHaveBeenCalledTimes(1);
+    root.querySelector('div')!.removeAttribute('hidden');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cb).toHaveBeenCalledTimes(2);
+    stop();
+    root.remove();
   });
 
   it('fires when a dialog or details element opens', async () => {

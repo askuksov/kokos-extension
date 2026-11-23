@@ -429,8 +429,10 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   //   caught too. A keyboard click (detail 0, on the focused button) has no
   //   pointerdown and no point to test.
   // - Dwell: the control must not have been shown or moved within DWELL_MS.
-  // - Hover dwell (mouse and pen, not touch): the pointer must have rested on
-  //   the control for DWELL_MS while it was plainly visible. The visibility
+  // - Hover dwell (mouse, and a pen once it has been seen hovering; not touch
+  //   or a contact-only pen, which keep the other checks): the pointer must
+  //   have rested on the control for DWELL_MS while it was plainly visible.
+  //   The visibility
   //   check runs when the pointer enters and, throttled, as it moves; a failed
   //   check restarts the hover. A control that pops up under a resting cursor
   //   gets a fresh pointerover, and one made visible (opacity) while the
@@ -474,8 +476,24 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     return !prev || Math.abs(r.left - prev.left) > 2 || Math.abs(r.top - prev.top) > 2;
   };
   // Since when the pointer has rested on each control while it looked intact.
-  const hoverSince = new Map<Element, number>();
-  const hoverCheckedAt = new Map<Element, number>();
+  // Weak: match rows are replaced every time the list opens.
+  const hoverSince = new WeakMap<Element, number>();
+  const hoverCheckedAt = new WeakMap<Element, number>();
+  // Pens that have moved over the page without touching it (buttons 0). Only
+  // those can rest on a control before a press; a contact-only pen sends its
+  // pointerover right before pointerdown and is treated like touch.
+  const hoveringPens = new Set<number>();
+  const notePenHover = (e: Event) => {
+    const p = e as PointerEvent;
+    if (p.pointerType === 'pen' && p.buttons === 0 && isTrusted(e)) hoveringPens.add(p.pointerId);
+  };
+  view.addEventListener('pointermove', notePenHover, { capture: true, passive: true });
+  const needsHover = (e: Event): boolean => {
+    const p = e as PointerEvent;
+    if (p.pointerType === 'touch') return false;
+    if (p.pointerType === 'pen') return hoveringPens.has(p.pointerId);
+    return true;
+  };
   const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
     if (!isTrusted(e)) return 'tamper';
     if (movedOnScreen(ioTarget)) shownAt.set(ioTarget, now());
@@ -485,7 +503,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     // A row cut off by the viewport edge is ordinary; scroll and click again.
     if (!insideViewport(control, view)) return 'wait';
     if (ioVisible.get(ioTarget) === false && !pageFiltered()) return 'tamper';
-    if (e.type === 'pointerdown' && (e as PointerEvent).pointerType !== 'touch'
+    if (e.type === 'pointerdown' && needsHover(e)
       && now() - (hoverSince.get(control) ?? Infinity) < DWELL_MS) return 'wait';
     const keyboard = e.type === 'click' && e.detail === 0;
     if (keyboard) return root.activeElement === control ? 'ok' : 'tamper';
@@ -496,6 +514,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // Wires the guard onto one control; `act` runs only for a click that passed.
   const guard = (control: HTMLElement, ioTarget: Element, w: number, h: number, act: () => void) => {
     const checkHover = (e: Event) => {
+      notePenHover(e);
       if (!isTrusted(e) || (e as PointerEvent).pointerType === 'touch') return;
       hoverCheckedAt.set(control, now());
       if (!overlayHostIntact(host)) hoverSince.delete(control);
@@ -569,7 +588,8 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
       put(rect.left, rect.bottom);
       list.style.display = 'block';
       // Keep the list on screen so its rows can pass the guard's viewport
-      // check: shift it left off the right edge, and open it above the field
+      // check: shift it in from whichever side edge it crosses (the left one
+      // wins for a list wider than the viewport), and open it above the field
       // when there is no room below. A list that fits stays at the anchor.
       const r = list.getBoundingClientRect();
       const vw = view.innerWidth || doc.documentElement.clientWidth;
@@ -577,7 +597,10 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
       const pad = 4;
       let dx = 0;
       let dy = 0;
-      if (r.width > 0 && r.right > vw - pad) dx = Math.max(pad - r.left, vw - pad - r.right);
+      if (r.width > 0) {
+        if (r.right > vw - pad) dx = vw - pad - r.right;
+        if (r.left + dx < pad) dx = pad - r.left;
+      }
       if (r.height > 0 && r.bottom > vh - pad) {
         const above = rect.top - pad - r.height; // visual top when opened above
         dy = above >= pad ? above - r.top : Math.max(pad - r.top, vh - pad - r.bottom);
@@ -625,6 +648,11 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     },
     hideToast() { toast.style.display = 'none'; toast.textContent = ''; },
     hide() { icon.style.display = 'none'; list.style.display = 'none'; },
-    destroy() { destroyed = true; io?.disconnect(); host.remove(); },
+    destroy() {
+      destroyed = true;
+      io?.disconnect();
+      view.removeEventListener('pointermove', notePenHover, { capture: true });
+      host.remove();
+    },
   };
 }

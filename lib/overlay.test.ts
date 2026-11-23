@@ -376,6 +376,17 @@ describe('overlay host placement', () => {
     ov.destroy();
   });
 
+  it('shifts the list right off the left edge', () => {
+    document.body.innerHTML = '';
+    const anchor = fieldAt(document.body, -60, 10); // field partly off-screen on the left
+    const { ov, list } = overlayWithRoot();
+    listFollowsStyle(list);
+    ov.showMatches(anchor, [{ id: 'a', title: 'A' }], () => {});
+    expect(list.style.left).toBe('4px');
+    expect(list.style.top).toBe('34px');
+    ov.destroy();
+  });
+
   it('keeps a list that fits at its anchor', () => {
     document.body.innerHTML = '';
     const anchor = fieldAt(document.body, 10, 10);
@@ -613,9 +624,10 @@ describe('activation guard', () => {
     el.dispatchEvent(pointer('pointerover', 196, 22, pointerType));
     clock.t = t;
   }
-  function pointer(type: string, x: number, y: number, pointerType = 'mouse'): MouseEvent {
-    const e = new MouseEvent(type, { clientX: x, clientY: y, detail: 1, bubbles: true, cancelable: true });
+  function pointer(type: string, x: number, y: number, pointerType = 'mouse', pointerId = 1, buttons = 0): MouseEvent {
+    const e = new MouseEvent(type, { clientX: x, clientY: y, detail: 1, bubbles: true, cancelable: true, buttons });
     Object.defineProperty(e, 'pointerType', { value: pointerType });
+    Object.defineProperty(e, 'pointerId', { value: pointerId });
     return e;
   }
   function press(el: HTMLElement, x = 196, y = 22) {
@@ -761,6 +773,31 @@ describe('activation guard', () => {
       icon.dispatchEvent(pointer('pointermove', 197, 22)); // seen intact from now on
       env.t += 300;
       downAndClick(icon);
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('does not require hovering for a pen that has never hovered', () => {
+      // A contact-only pen sends pointerover right before pointerdown.
+      const { ov, icon, onIcon } = shown();
+      icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
+      expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('requires the hover dwell from a pen once it has been seen hovering', () => {
+      const { ov, icon, env, onIcon } = shown();
+      document.body.dispatchEvent(pointer('pointermove', 400, 400, 'pen', 7, 0)); // hovering, no contact
+      icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 0));
+      env.t += 50;
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
+      expect(onIcon).not.toHaveBeenCalled();
+      env.t += 300;
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
       expect(onIcon).toHaveBeenCalledTimes(1);
       ov.destroy();
     });

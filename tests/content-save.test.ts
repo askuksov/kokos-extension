@@ -27,6 +27,37 @@ describe('wireSaveCapture', () => {
     expect(send).toHaveBeenCalledWith({ username: 'alice', password: 'hunter2' });
   });
 
+  it('still captures when the page disables the form on submit before our listener', () => {
+    const f = loginForm();
+    f.insertAdjacentHTML('afterbegin', '<fieldset id="fs"></fieldset>');
+    const fs = document.getElementById('fs')!;
+    for (const el of Array.from(f.querySelectorAll('input'))) fs.appendChild(el);
+    // Registered first, so it runs before ours in the same capture phase.
+    const disable = () => { (fs as HTMLFieldSetElement).disabled = true; };
+    document.addEventListener('submit', disable, true);
+    const send = vi.fn();
+    wireSaveCapture(document, send);
+    f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    document.removeEventListener('submit', disable, true);
+    expect(send).toHaveBeenCalledWith({ username: 'alice', password: 'hunter2' });
+  });
+
+  it('still captures a formless login the page hides on the button click', () => {
+    document.body.innerHTML = `
+      <div id="box">
+        <input name="email" type="text" value="alice">
+        <input name="password" type="password" value="hunter2">
+        <button type="button" id="go">Sign in</button>
+      </div>`;
+    const hide = () => { document.getElementById('box')!.hidden = true; };
+    document.addEventListener('click', hide, true);
+    const send = vi.fn();
+    wireSaveCapture(document, send);
+    (document.getElementById('go') as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.removeEventListener('click', hide, true);
+    expect(send).toHaveBeenCalledWith({ username: 'alice', password: 'hunter2' });
+  });
+
   it('does not send when the password is empty', () => {
     const f = loginForm();
     (f.querySelector('[name=password]') as HTMLInputElement).value = '';
