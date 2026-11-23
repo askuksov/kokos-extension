@@ -49,14 +49,22 @@ export function isUsableField(input: HTMLInputElement): boolean {
   return view?.getComputedStyle(input).visibility !== 'hidden';
 }
 
-export function detectLoginForms(root: ParentNode): LoginForm[] {
+export interface DetectOptions {
+  // Skip fields the user cannot see or type in (default). Save capture turns
+  // this off: a page often disables or hides its form on submit before our
+  // listener runs, and the typed values are still the ones to save.
+  usableOnly?: boolean;
+}
+
+export function detectLoginForms(root: ParentNode, opts: DetectOptions = {}): LoginForm[] {
+  const usableOnly = opts.usableOnly ?? true;
   const groups = new Map<HTMLFormElement | null, { u: HTMLInputElement | null; cur: HTMLInputElement | null; nw: HTMLInputElement | null }>();
   for (const el of Array.from(root.querySelectorAll('input'))) {
     const input = el as HTMLInputElement;
     const role = classifyField(input);
     // Only classified fields are checked: the style walk is not free. A hidden
     // form must not displace a visible one in forms[0].
-    if (role === 'unknown' || !isUsableField(input)) continue;
+    if (role === 'unknown' || (usableOnly && !isUsableField(input))) continue;
     const key = input.form ?? null;
     const g = groups.get(key) ?? { u: null, cur: null, nw: null };
     if (role === 'username' && !g.u) g.u = input;
@@ -77,9 +85,13 @@ export function detectLoginForms(root: ParentNode): LoginForm[] {
   return [...withPassword, ...usernameOnly];
 }
 
+// `disabled` and `hidden` re-scan when a field (or an ancestor such as a
+// fieldset) becomes usable. `class` and `style` are left out on purpose: they
+// change every frame on busy pages (and on our own host), and CSS-driven
+// reveals are caught by the transition/animation settle hooks.
 export function watch(target: Node, onChange: () => void): () => void {
   const obs = new MutationObserver(() => onChange());
-  obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'autocomplete', 'name', 'id', 'open'] });
+  obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'autocomplete', 'name', 'id', 'open', 'disabled', 'hidden'] });
   return () => obs.disconnect();
 }
 
