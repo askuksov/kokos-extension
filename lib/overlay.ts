@@ -483,18 +483,25 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // contact-only: it entered this control already touching (buttons > 0) and
   // no hovering event (buttons 0) for that pointer reached the control since.
   // The proof comes from the control's own events, so a page that swallows
-  // events elsewhere can only make the guard stricter.
+  // events elsewhere can only make the guard stricter. A pen seen hovering
+  // anywhere on the page (buttons 0) can hover, so it is never exempt.
   const penContactEntry = new WeakMap<Element, number>();
+  const hoveringPens = new Set<number>();
+  const notePenHover = (e: Event) => {
+    const p = e as PointerEvent;
+    if (p.pointerType === 'pen' && p.buttons === 0 && isTrusted(e)) hoveringPens.add(p.pointerId);
+  };
+  view.addEventListener('pointermove', notePenHover, { capture: true, passive: true });
   const notePen = (control: Element, e: Event) => {
     const p = e as PointerEvent;
     if (p.pointerType !== 'pen' || !isTrusted(e)) return;
-    if (p.buttons === 0) penContactEntry.delete(control);
+    if (p.buttons === 0) { hoveringPens.add(p.pointerId); penContactEntry.delete(control); }
     else if (e.type === 'pointerover') penContactEntry.set(control, p.pointerId);
   };
   const needsHover = (e: Event, control: Element): boolean => {
     const p = e as PointerEvent;
     if (p.pointerType === 'touch') return false;
-    if (p.pointerType === 'pen') return penContactEntry.get(control) !== p.pointerId;
+    if (p.pointerType === 'pen') return hoveringPens.has(p.pointerId) || penContactEntry.get(control) !== p.pointerId;
     return true;
   };
   const verdict = (e: MouseEvent, control: HTMLElement, ioTarget: Element, w: number, h: number): Verdict => {
@@ -655,6 +662,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     destroy() {
       destroyed = true;
       io?.disconnect();
+      view.removeEventListener('pointermove', notePenHover, { capture: true });
       host.remove();
     },
   };
