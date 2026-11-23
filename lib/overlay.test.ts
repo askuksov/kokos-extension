@@ -824,6 +824,17 @@ describe('activation guard', () => {
       ov.destroy();
     });
 
+    it('requires the hover dwell from a pen seen hovering elsewhere even if it enters touching', () => {
+      const { ov, icon, env, onIcon } = shown();
+      document.body.dispatchEvent(pointer('pointermove', 400, 400, 'pen', 7, 0)); // hovering elsewhere
+      icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 1));
+      env.t += 20;
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
+      expect(onIcon).not.toHaveBeenCalled();
+      ov.destroy();
+    });
+
     it('does not require hovering for touch', () => {
       const { ov, icon, onIcon } = shown();
       downAndClick(icon, 'touch');
