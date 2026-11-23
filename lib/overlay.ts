@@ -482,10 +482,40 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // While a hover is being timed, the host is re-checked on a short timer:
   // opacity or visibility changes send no pointer event, and a hover must not
   // count time during which the overlay was hidden.
+  // Besides the timer, any change that could hide the host between two ticks
+  // ends the hover at once: a style/class/hidden change on the host or one of
+  // its ancestors, a stylesheet added or removed, or an animation/transition
+  // starting on an element that contains the host. Watched only while a hover
+  // is being timed, so busy pages pay nothing otherwise.
   const hoverPoll = new WeakMap<Element, ReturnType<Window['setInterval']>>();
+  const hoverWatch = new WeakMap<Element, () => void>();
+  const watchHostChain = (onChange: () => void): (() => void) => {
+    const MO = view.MutationObserver;
+    const attrs = new MO(() => onChange());
+    for (let el: Element | null = host; el; el = el.parentElement) {
+      attrs.observe(el, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'open', 'popover'] });
+    }
+    const sheets = new MO((records) => {
+      for (const r of records) {
+        for (const n of [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)]) {
+          const name = n.nodeName;
+          if (name === 'STYLE' || name === 'LINK') { onChange(); return; }
+        }
+      }
+    });
+    sheets.observe(doc.documentElement, { childList: true, subtree: true });
+    const onAnim = (e: Event) => { const t = e.target; if (t instanceof view.Node && t !== host && (t as Node).contains(host)) onChange(); };
+    for (const type of ['animationstart', 'transitionstart', 'transitionrun']) view.addEventListener(type, onAnim, true);
+    return () => {
+      attrs.disconnect(); sheets.disconnect();
+      for (const type of ['animationstart', 'transitionstart', 'transitionrun']) view.removeEventListener(type, onAnim, true);
+    };
+  };
   const stopHoverPoll = (control: Element) => {
     const id = hoverPoll.get(control);
     if (id !== undefined) { view.clearInterval(id); hoverPoll.delete(control); }
+    const unwatch = hoverWatch.get(control);
+    if (unwatch) { unwatch(); hoverWatch.delete(control); }
   };
   const endHover = (control: Element) => { hoverSince.delete(control); stopHoverPoll(control); };
   const startHoverPoll = (control: Element) => {
@@ -493,6 +523,7 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
     hoverPoll.set(control, view.setInterval(() => {
       if (destroyed || !control.isConnected || !overlayHostIntact(host)) endHover(control);
     }, HOVER_CHECK_MS));
+    hoverWatch.set(control, watchHostChain(() => endHover(control)));
   };
   // A pen is exempt from the hover dwell only on positive proof that it is
   // contact-only: it entered this control with the tip down (buttons bit 1)

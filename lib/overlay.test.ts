@@ -777,6 +777,37 @@ describe('activation guard', () => {
       }
     });
 
+    it('drops a hover when the overlay is hidden and restored between two timer ticks', async () => {
+      document.body.innerHTML = '<dialog></dialog>';
+      const dialog = document.querySelector('dialog')!;
+      markTopLayer(dialog, ':modal');
+      const { ov, field, icon, env } = openOverlay(dialog);
+      const onIcon = vi.fn();
+      ov.showIcon(field, onIcon);
+      env.t += 400;
+      icon.dispatchEvent(pointer('pointerover', 196, 22)); // hover starts while intact
+      dialog.style.opacity = '0'; // hidden and restored with no timer tick in between
+      dialog.style.opacity = '1';
+      await Promise.resolve(); // mutation records are delivered as a microtask
+      env.t += 400;
+      downAndClick(icon);
+      expect(onIcon).not.toHaveBeenCalled();
+      ov.destroy();
+    });
+
+    it('drops a hover when a stylesheet is added while it is being timed', async () => {
+      const { ov, icon, env, onIcon } = shown();
+      icon.dispatchEvent(pointer('pointerover', 196, 22));
+      const style = document.createElement('style');
+      document.head.appendChild(style);
+      await Promise.resolve();
+      env.t += 400;
+      downAndClick(icon);
+      expect(onIcon).not.toHaveBeenCalled();
+      style.remove();
+      ov.destroy();
+    });
+
     it('does not exempt a pen that enters with only the barrel button held', () => {
       const { ov, icon, env, onIcon } = shown();
       icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 9, 2)); // barrel held, tip up
