@@ -479,23 +479,39 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
   // Weak: match rows are replaced every time the list opens.
   const hoverSince = new WeakMap<Element, number>();
   const hoverCheckedAt = new WeakMap<Element, number>();
+  // While a hover is being timed, the host is re-checked on a short timer:
+  // opacity or visibility changes send no pointer event, and a hover must not
+  // count time during which the overlay was hidden.
+  const hoverPoll = new WeakMap<Element, ReturnType<Window['setInterval']>>();
+  const stopHoverPoll = (control: Element) => {
+    const id = hoverPoll.get(control);
+    if (id !== undefined) { view.clearInterval(id); hoverPoll.delete(control); }
+  };
+  const endHover = (control: Element) => { hoverSince.delete(control); stopHoverPoll(control); };
+  const startHoverPoll = (control: Element) => {
+    if (hoverPoll.has(control)) return;
+    hoverPoll.set(control, view.setInterval(() => {
+      if (destroyed || !control.isConnected || !overlayHostIntact(host)) endHover(control);
+    }, HOVER_CHECK_MS));
+  };
   // A pen is exempt from the hover dwell only on positive proof that it is
-  // contact-only: it entered this control already touching (buttons > 0) and
-  // no hovering event (buttons 0) for that pointer reached the control since.
+  // contact-only: it entered this control with the tip down (buttons bit 1)
+  // and no hovering event (tip up, even with the barrel button held) for that
+  // pointer reached the control since.
   // The proof comes from the control's own events, so a page that swallows
   // events elsewhere can only make the guard stricter. A pen seen hovering
-  // anywhere on the page (buttons 0) can hover, so it is never exempt.
+  // anywhere on the page (tip up) can hover, so it is never exempt.
   const penContactEntry = new WeakMap<Element, number>();
   const hoveringPens = new Set<number>();
   const notePenHover = (e: Event) => {
     const p = e as PointerEvent;
-    if (p.pointerType === 'pen' && p.buttons === 0 && isTrusted(e)) hoveringPens.add(p.pointerId);
+    if (p.pointerType === 'pen' && (p.buttons & 1) === 0 && isTrusted(e)) hoveringPens.add(p.pointerId);
   };
   view.addEventListener('pointermove', notePenHover, { capture: true, passive: true });
   const notePen = (control: Element, e: Event) => {
     const p = e as PointerEvent;
     if (p.pointerType !== 'pen' || !isTrusted(e)) return;
-    if (p.buttons === 0) { hoveringPens.add(p.pointerId); penContactEntry.delete(control); }
+    if ((p.buttons & 1) === 0) { hoveringPens.add(p.pointerId); penContactEntry.delete(control); }
     else if (e.type === 'pointerover') penContactEntry.set(control, p.pointerId);
   };
   const needsHover = (e: Event, control: Element): boolean => {
@@ -527,15 +543,15 @@ export function createOverlay(doc: Document = document, opts: OverlayOptions = {
       notePen(control, e);
       if (!isTrusted(e) || (e as PointerEvent).pointerType === 'touch') return;
       hoverCheckedAt.set(control, now());
-      if (!overlayHostIntact(host)) hoverSince.delete(control);
-      else if (!hoverSince.has(control)) hoverSince.set(control, now());
+      if (!overlayHostIntact(host)) endHover(control);
+      else if (!hoverSince.has(control)) { hoverSince.set(control, now()); startHoverPoll(control); }
     };
     control.addEventListener('pointerover', checkHover);
     control.addEventListener('pointermove', (e) => {
       notePen(control, e);
       if (now() - (hoverCheckedAt.get(control) ?? -Infinity) >= HOVER_CHECK_MS) checkHover(e);
     });
-    control.addEventListener('pointerleave', () => { hoverSince.delete(control); penContactEntry.delete(control); });
+    control.addEventListener('pointerleave', () => { endHover(control); penContactEntry.delete(control); });
     control.addEventListener('pointerdown', (e) => {
       const v = verdict(e as MouseEvent, control, ioTarget, w, h);
       armed = v === 'ok' ? { control, at: now() } : null;
