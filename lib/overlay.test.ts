@@ -777,7 +777,7 @@ describe('activation guard', () => {
       ov.destroy();
     });
 
-    it('does not require hovering for a pen that has never hovered', () => {
+    it('does not require hovering for a pen that entered the control already touching', () => {
       // A contact-only pen sends pointerover right before pointerdown.
       const { ov, icon, onIcon } = shown();
       icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 1));
@@ -787,7 +787,7 @@ describe('activation guard', () => {
       ov.destroy();
     });
 
-    it('requires the hover dwell from a pen once it has been seen hovering', () => {
+    it('requires the hover dwell from a pen that hovered onto the control', () => {
       const { ov, icon, env, onIcon } = shown();
       document.body.dispatchEvent(pointer('pointermove', 400, 400, 'pen', 7, 0)); // hovering, no contact
       icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 0));
@@ -799,6 +799,28 @@ describe('activation guard', () => {
       icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
       icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
       expect(onIcon).toHaveBeenCalledTimes(1);
+      ov.destroy();
+    });
+
+    it('requires the hover dwell from a pen that entered without touching, even with no page-level hover seen', () => {
+      const { ov, icon, env, onIcon } = shown();
+      icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 0));
+      env.t += 50;
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
+      expect(onIcon).not.toHaveBeenCalled();
+      ov.destroy();
+    });
+
+    it('drops the contact-only exemption once the pen hovers over the control', () => {
+      const { ov, icon, env, onIcon } = shown();
+      icon.dispatchEvent(pointer('pointerover', 196, 22, 'pen', 7, 1));
+      env.t += 60;
+      icon.dispatchEvent(pointer('pointermove', 197, 22, 'pen', 7, 0)); // lifted, now hovering
+      env.t += 10;
+      icon.dispatchEvent(pointer('pointerdown', 196, 22, 'pen', 7, 1));
+      icon.dispatchEvent(pointer('click', 196, 22, 'pen', 7, 0));
+      expect(onIcon).not.toHaveBeenCalled();
       ov.destroy();
     });
 
